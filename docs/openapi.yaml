@@ -1,0 +1,1280 @@
+openapi: 3.1.0
+info:
+  title: Ledgify API
+  description: |
+    Ledgify is a double-entry ledger application. This API exposes authentication,
+    the chart of accounts, journals (with lines and tags), and audit logs.
+
+    All protected endpoints require a Bearer token obtained from `POST /api/v1/login`
+    or `POST /api/v1/register`.
+
+    ## Authentication
+
+    Register or log in to receive a `token`. Send it in the `Authorization` header:
+
+    ```
+    Authorization: Bearer <token>
+    ```
+
+    ## Conventions
+
+    - Paginated responses use the Laravel resource pagination envelope
+      (`data`, `links`, `meta`).
+    - Errors use the Laravel JSON error format. Validation failures return `422`
+      with a `message` and `errors` map.
+    - Monetary values (`debit`, `credit`) are returned as strings to avoid
+      floating point precision loss. A journal is balanced when the sum of its
+      debit lines equals the sum of its credit lines.
+    - Dates and timestamps are ISO-8601 strings.
+
+    ## Ledger immutability
+
+    The ledger is immutable. A journal is created as `draft` or `posted`.
+    Once a journal is **posted** (or **archived**), it can no longer be
+    updated, deleted, or receive new lines/tags — any attempt returns `403`.
+
+    To correct or cancel a posted journal, create a **reversal** via
+    `POST /api/v1/journals/{journal}/reverse`. This posts a new journal whose
+    debit and credit lines are the inverse of the original, sets
+    `reverse_from_id` to the original journal's id, copies its tags, and marks
+    it `source: system`.
+  version: 1.0.0
+  contact:
+    name: Ledgify
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development
+tags:
+  - name: Auth
+    description: Registration, login, and logout
+  - name: Accounts
+    description: Chart of accounts
+  - name: Journals
+    description: Journal entries with lines and tags
+  - name: Journal Lines
+    description: Individual debit/credit lines of a journal
+  - name: Journal Tags
+    description: Attach tags to journals
+  - name: Tags
+    description: Tag definitions
+  - name: Audit Logs
+    description: Read-only audit trail
+
+security:
+  - bearerAuth: []
+
+paths:
+  /register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                password_confirmation:
+                  type: string
+                  minLength: 8
+              example:
+                name: Jane Doe
+                email: jane@example.com
+                password: password
+                password_confirmation: password
+      responses:
+        '201':
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, token]
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+                    description: Bearer token to authenticate future requests
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /login:
+    post:
+      tags: [Auth]
+      summary: Log in and receive a token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                device_name:
+                  type: string
+                  maxLength: 255
+                  description: Informational device name for the issued token
+              example:
+                email: jane@example.com
+                password: password
+                device_name: Postman
+      responses:
+        '200':
+          description: Logged in successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, token]
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  token:
+                    type: string
+        '422':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Invalidate the current token
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /accounts:
+    get:
+      tags: [Accounts]
+      summary: List accounts
+      description: Filter by type, currency, status, and search by name.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [asset, liability, equity, income, expense]
+        - name: currency
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive]
+        - name: search
+          in: query
+          description: Partial match against the account name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of accounts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Accounts]
+      summary: Create an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountStore'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /accounts/{account}:
+    parameters:
+      - $ref: '#/components/parameters/AccountId'
+    get:
+      tags: [Accounts]
+      summary: Show an account
+      responses:
+        '200':
+          description: Account details with parent and children
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Accounts]
+      summary: Update an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountStore'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Accounts]
+      summary: Delete an account
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /journals:
+    get:
+      tags: [Journals]
+      summary: List journals
+      description: Filter by status, source, and transaction date range.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, posted, archived]
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [manual, imported, system]
+        - name: from
+          in: query
+          description: Transaction date lower bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Transaction date upper bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Paginated list of journals
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Journal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Journals]
+      summary: Create a journal with lines and tags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalStore'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Journal'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /journals/{journal}:
+    parameters:
+      - $ref: '#/components/parameters/JournalId'
+    get:
+      tags: [Journals]
+      summary: Show a journal
+      responses:
+        '200':
+          description: Journal with lines, tags, and user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Journal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Journals]
+      summary: Update a journal (replaces lines and tags if provided)
+      description: Only a journal with status `draft` can be updated. Posted and archived journals are immutable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalStore'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Journal'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags: [Journals]
+      summary: Delete a journal
+      description: Only a journal with status `draft` can be deleted. Posted and archived journals are immutable.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Journals]
+      summary: Reverse a posted journal
+      description: |
+        Creates a new posted journal with inverted debit/credit lines that
+        cancels out the original. The reversal references the source journal
+        via `reverse_from_id`, copies its tags, and is marked `source: system`.
+
+        Only a journal with status `posted` can be reversed.
+      responses:
+        '201':
+          description: Reversal journal created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Journal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /journal-lines:
+    get:
+      tags: [Journal Lines]
+      summary: List journal lines
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated list of journal lines
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JournalLine'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Journal Lines]
+      summary: Create a journal line
+      description: Exactly one of `debit` or `credit` must be provided and positive. Lines can only be added to a journal with status `draft`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalLineStore'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JournalLine'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /journal-lines/{journal_line}:
+    parameters:
+      - $ref: '#/components/parameters/JournalLineId'
+    get:
+      tags: [Journal Lines]
+      summary: Show a journal line
+      responses:
+        '200':
+          description: Journal line with journal and account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JournalLine'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Journal Lines]
+      summary: Update a journal line
+      description: Only lines on a journal with status `draft` can be updated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JournalLineStore'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JournalLine'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Journal Lines]
+      summary: Delete a journal line
+      description: Only lines on a journal with status `draft` can be deleted.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /journal-tags:
+    get:
+      tags: [Journal Tags]
+      summary: List journal-tag relations
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated list of journal-tag relations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JournalTag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Journal Tags]
+      summary: Attach a tag to a journal
+      description: Tags can only be attached to a journal with status `draft`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [journal_id, tag_id]
+              properties:
+                journal_id:
+                  type: string
+                  format: uuid
+                tag_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JournalTag'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tags:
+    get:
+      tags: [Tags]
+      summary: List tags
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated list of tags
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Tag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Tags]
+      summary: Create a tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                type:
+                  type: string
+                  enum: [priority, recurring, vendor, tax, transfer]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tag'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tags/{tag}:
+    parameters:
+      - $ref: '#/components/parameters/TagId'
+    get:
+      tags: [Tags]
+      summary: Show a tag
+      responses:
+        '200':
+          description: Tag details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Tags]
+      summary: Update a tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                type:
+                  type: string
+                  enum: [priority, recurring, vendor, tax, transfer]
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tag'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Tags]
+      summary: Delete a tag
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /audit-logs:
+    get:
+      tags: [Audit Logs]
+      summary: List audit logs
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated list of audit logs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /audit-logs/{audit_log}:
+    parameters:
+      - $ref: '#/components/parameters/AuditLogId'
+    get:
+      tags: [Audit Logs]
+      summary: Show an audit log
+      responses:
+        '200':
+          description: Audit log with user and journal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PerPage:
+      name: per_page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 15
+    AccountId:
+      name: account
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JournalId:
+      name: journal
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JournalLineId:
+      name: journal_line
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TagId:
+      name: tag
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AuditLogId:
+      name: audit_log
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+    Forbidden:
+      description: Authenticated but not authorized to perform this action
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [message, errors]
+            properties:
+              message:
+                type: string
+              errors:
+                type: object
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
+
+  schemas:
+    Paginated:
+      type: object
+      required: [current_page, data, first_page_url, from, last_page, last_page_url, links, next_page_url, path, per_page, prev_page_url, to, total]
+      properties:
+        current_page:
+          type: integer
+        first_page_url:
+          type: string
+          format: uri
+        from:
+          type: integer
+          nullable: true
+        last_page:
+          type: integer
+        last_page_url:
+          type: string
+          format: uri
+        links:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+                nullable: true
+              label:
+                type: string
+              active:
+                type: boolean
+        next_page_url:
+          type: string
+          format: uri
+          nullable: true
+        path:
+          type: string
+          format: uri
+        per_page:
+          type: integer
+        prev_page_url:
+          type: string
+          format: uri
+          nullable: true
+        to:
+          type: integer
+          nullable: true
+        total:
+          type: integer
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        email_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          readOnly: true
+          description: Auto-generated from the account type (e.g. AS-0001).
+        name:
+          type: string
+        type:
+          type: string
+          enum: [asset, liability, equity, income, expense]
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        currency:
+          type: string
+          maxLength: 3
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        parent:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Account'
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+
+    AccountStore:
+      type: object
+      required: [name, type, currency, status]
+      properties:
+        code:
+          type: string
+          readOnly: true
+          description: Auto-generated from the account type (e.g. AS-0001). Not accepted on write.
+        name:
+          type: string
+          maxLength: 255
+        type:
+          type: string
+          enum: [asset, liability, equity, income, expense]
+        parent_id:
+          type: string
+          format: uuid
+          nullable: true
+        currency:
+          type: string
+          maxLength: 3
+        status:
+          type: string
+          enum: [active, inactive]
+      example:
+        name: Petty Cash
+        type: asset
+        currency: IDR
+        status: active
+
+    Journal:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        transaction_date:
+          type: string
+          format: date-time
+        description:
+          type: string
+        reference:
+          type: string
+        status:
+          type: string
+          enum: [draft, posted, archived]
+        source:
+          type: string
+          enum: [manual, imported, system]
+        reverse_from_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        user:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLine'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+
+    JournalStore:
+      type: object
+      required: [transaction_date, description, reference, status, source, lines]
+      properties:
+        transaction_date:
+          type: string
+          format: date
+        description:
+          type: string
+          maxLength: 255
+        reference:
+          type: string
+          maxLength: 255
+        status:
+          type: string
+          enum: [draft, posted, archived]
+        source:
+          type: string
+          enum: [manual, imported, system]
+        reverse_from_id:
+          type: string
+          format: uuid
+          nullable: true
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [account_id]
+            properties:
+              account_id:
+                type: string
+                format: uuid
+              debit:
+                type: number
+                minimum: 0
+              credit:
+                type: number
+                minimum: 0
+              description:
+                type: string
+                maxLength: 255
+        tags:
+          type: array
+          items:
+            type: string
+            format: uuid
+      example:
+        transaction_date: '2026-08-01'
+        description: Initial capital injection
+        reference: JRN-2026-0001
+        status: posted
+        source: manual
+        lines:
+          - account_id: 019fe4f1-0000-0000-0000-000000000001
+            debit: 1000.00
+            description: Cash
+          - account_id: 019fe4f1-0000-0000-0000-000000000002
+            credit: 1000.00
+            description: Owner equity
+
+    JournalLine:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        journal_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        debit:
+          type: string
+          description: Monetary value as a decimal string
+        credit:
+          type: string
+          description: Monetary value as a decimal string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        journal:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Journal'
+        account:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Account'
+
+    JournalLineStore:
+      type: object
+      required: [journal_id, account_id]
+      properties:
+        journal_id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        debit:
+          type: number
+          minimum: 0
+          description: Required unless credit is provided
+        credit:
+          type: number
+          minimum: 0
+          description: Required unless debit is provided
+        description:
+          type: string
+          maxLength: 255
+      example:
+        journal_id: 019fe4f1-0000-0000-0000-000000000001
+        account_id: 019fe4f1-0000-0000-0000-000000000002
+        debit: 250.00
+        description: New line
+
+    JournalTag:
+      type: object
+      properties:
+        journal_id:
+          type: string
+          format: uuid
+        tag_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        journal:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Journal'
+        tag:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Tag'
+
+    Tag:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [priority, recurring, vendor, tax, transfer]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        journals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Journal'
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        before:
+          type: object
+          nullable: true
+          additionalProperties: true
+        after:
+          type: object
+          nullable: true
+          additionalProperties: true
+        reason:
+          type: string
+        journal_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        user:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        journal:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Journal'

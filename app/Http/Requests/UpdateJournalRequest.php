@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Contracts\Validation\ValidationRule;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+class UpdateJournalRequest extends FormRequest
+{
+    /**
+     * Determine if the user is authorized to make this request.
+     */
+    public function authorize(): bool
+    {
+        return $this->user()->can('update', $this->route('journal'));
+    }
+
+    /**
+     * Get the validation rules that apply to the request.
+     *
+     * @return array<string, ValidationRule|array<mixed>|string>
+     */
+    public function rules(): array
+    {
+        $journal = $this->route('journal');
+
+        return [
+            'transaction_date' => ['required', 'date'],
+            'description' => ['required', 'string', 'max:255'],
+            'reference' => ['required', 'string', 'max:255', Rule::unique('journals', 'reference')->ignore($journal->id)],
+            'status' => ['required', Rule::in(['draft', 'posted', 'archived'])],
+            'source' => ['required', Rule::in(['manual', 'imported', 'system'])],
+            'reverse_from_id' => ['nullable', 'uuid', 'exists:journals,id', Rule::notIn([$journal->id])],
+            'lines' => ['nullable', 'array', 'min:1'],
+            'lines.*.account_id' => ['required', 'uuid', 'exists:accounts,id'],
+            'lines.*.debit' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.credit' => ['nullable', 'numeric', 'min:0'],
+            'lines.*.description' => ['nullable', 'string', 'max:255'],
+            'tags' => ['nullable', 'array'],
+            'tags.*' => ['uuid', 'exists:tags,id'],
+        ];
+    }
+}
