@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
 use App\Http\Controllers\Api\JournalTagController;
@@ -39,6 +40,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('journal-lines', JournalLineController::class);
         Route::apiResource('journal-tags', JournalTagController::class)->only(['index', 'store']);
         Route::apiResource('tags', TagController::class);
+        Route::apiResource('budgets', BudgetController::class);
         Route::apiResource('audit-logs', AuditLogController::class)->only(['index', 'show']);
     });
 });
