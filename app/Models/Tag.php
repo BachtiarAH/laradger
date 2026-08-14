@@ -15,6 +15,7 @@ class Tag extends Model
     protected $fillable = [
         'name',
         'type',
+        'description',
     ];
 
     public function journalTags()
@@ -25,5 +26,10 @@ class Tag extends Model
     public function journals()
     {
         return $this->belongsToMany(Journal::class, 'journal_tags')->withTimestamps();
+    }
+
+    public function budgets()
+    {
+        return $this->belongsToMany(Budget::class, 'budget_tags')->withTimestamps();
     }
 }
