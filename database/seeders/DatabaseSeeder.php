@@ -29,6 +29,7 @@ class DatabaseSeeder extends Seeder
             JournalLineSeeder::class,
             JournalTagSeeder::class,
             AuditLogSeeder::class,
+            BudgetSeeder::class,
         ]);
     }
 }

@@ -8,17 +8,22 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('tags', function (Blueprint $table) {
+        Schema::create('budgets', function (Blueprint $table) {
             $table->uuid('id')->primary();
+            $table->uuid('user_id');
             $table->text('name');
-            $table->text('type');
             $table->text('description')->nullable();
+            $table->decimal('amount', 20, 2);
+            $table->date('starts_at');
+            $table->date('ends_at');
             $table->timestamps();
+
+            $table->foreign('user_id')->references('id')->on('users')->onDelete('restrict');
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('tags');
+        Schema::dropIfExists('budgets');
     }
 };
