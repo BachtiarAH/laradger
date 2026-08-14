@@ -12,6 +12,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->uuid('user_id');
             $table->text('name');
+            $table->text('description')->nullable();
             $table->decimal('amount', 20, 2);
             $table->date('starts_at');
             $table->date('ends_at');
