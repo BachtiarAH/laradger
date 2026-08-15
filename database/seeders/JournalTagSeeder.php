@@ -4,13 +4,10 @@ namespace Database\Seeders;
 
 use App\Models\Journal;
 use App\Models\Tag;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class JournalTagSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Run the database seeds.
      */
@@ -31,11 +28,9 @@ class JournalTagSeeder extends Seeder
                 continue;
             }
 
-            foreach ($tagNames as $tagName) {
-                $tag = Tag::where('name', $tagName)->first();
+            $tagIds = Tag::whereIn('name', $tagNames)->pluck('id');
 
-                $journal->tags()->attach($tag);
-            }
+            $journal->tags()->syncWithoutDetaching($tagIds);
         }
     }
 }

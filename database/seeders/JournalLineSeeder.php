@@ -4,13 +4,10 @@ namespace Database\Seeders;
 
 use App\Models\Account;
 use App\Models\Journal;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class JournalLineSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Run the database seeds.
      */
@@ -49,7 +46,7 @@ class JournalLineSeeder extends Seeder
             foreach ($lines as $lineData) {
                 $account = Account::where('code', $lineData['account'])->first();
 
-                $journal->lines()->create([
+                $journal->lines()->firstOrCreate([
                     'account_id' => $account->id,
                     'debit' => $lineData['debit'],
                     'credit' => $lineData['credit'],

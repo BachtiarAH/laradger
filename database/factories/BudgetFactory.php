@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Budget;
+use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -18,6 +19,7 @@ class BudgetFactory extends Factory
         $startsAt = $this->faker->dateTimeBetween('-2 months', '+1 month');
 
         return [
+            'tenant_id' => Tenant::factory(),
             'user_id' => User::factory(),
             'name' => $this->faker->words(3, true),
             'description' => $this->faker->optional()->sentence(),

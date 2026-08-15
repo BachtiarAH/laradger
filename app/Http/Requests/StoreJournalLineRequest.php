@@ -3,8 +3,10 @@
 namespace App\Http\Requests;
 
 use App\Models\JournalLine;
+use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreJournalLineRequest extends FormRequest
 {
@@ -24,8 +26,8 @@ class StoreJournalLineRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'journal_id' => ['required', 'uuid', 'exists:journals,id'],
-            'account_id' => ['required', 'uuid', 'exists:accounts,id'],
+            'journal_id' => ['required', 'uuid', Rule::exists('journals', 'id')->where('tenant_id', TenantContext::id())],
+            'account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
             'debit' => ['required_without:credit', 'nullable', 'numeric', 'min:0'],
             'credit' => ['required_without:debit', 'nullable', 'numeric', 'min:0'],
             'description' => ['nullable', 'string', 'max:255'],

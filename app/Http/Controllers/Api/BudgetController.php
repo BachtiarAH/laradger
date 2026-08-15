@@ -16,7 +16,6 @@ class BudgetController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $query = Budget::query()
-            ->where('user_id', $request->user()->id)
             ->with(['accounts', 'tags']);
 
         if ($request->filled('search')) {
@@ -98,6 +97,6 @@ class BudgetController extends Controller
 
     private function ensureOwner(Request $request, Budget $budget): void
     {
-        abort_unless($budget->user_id === $request->user()->id, 404);
+        abort_unless($request->user()->belongsToTenant($budget->tenant_id), 404);
     }
 }

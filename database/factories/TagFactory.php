@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Tag;
+use App\Models\Tenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -18,6 +19,7 @@ class TagFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => Tenant::factory(),
             'name' => $this->faker->word(),
             'type' => $this->faker->randomElement(['priority', 'recurring', 'vendor', 'tax', 'transfer']),
             'created_at' => now(),

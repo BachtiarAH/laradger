@@ -3,10 +3,24 @@ info:
   title: Ledgify API
   description: |
     Ledgify is a double-entry ledger application. This API exposes authentication,
-    the chart of accounts, journals (with lines and tags), and audit logs.
+    the chart of accounts, journals (with lines and tags), budgets, and audit logs.
 
-    All protected endpoints require a Bearer token obtained from `POST /api/v1/login`
-    or `POST /api/v1/register`.
+    ## Multi-tenancy
+
+    Every user belongs to one or more **tenants** (organizations). Registration
+    automatically creates a tenant and attaches the user as its `owner`.
+
+    All protected endpoints require the target tenant to be selected by sending
+    its slug in the `X-Tenant` header:
+
+    ```
+    X-Tenant: my-company
+    ```
+
+    Responses are scoped to the selected tenant only:
+    - A missing `X-Tenant` header returns `422` with an `errors.tenant` message.
+    - An unknown slug returns `404`.
+    - A slug for a tenant you are not a member of returns `403`.
 
     ## Authentication
 
@@ -57,17 +71,57 @@ tags:
     description: Attach tags to journals
   - name: Tags
     description: Tag definitions
+  - name: Budgets
+    description: Spending budgets linked to accounts and tags
   - name: Audit Logs
     description: Read-only audit trail
+  - name: Tenants
+    description: List the tenants a user belongs to
+  - name: Docs
+    description: OpenAPI specification endpoint
 
 security:
   - bearerAuth: []
 
 paths:
+  /../docs:
+    get:
+      tags: [Docs]
+      summary: OpenAPI specification
+      description: |
+        Serves the raw OpenAPI specification (YAML). By default the content is
+        rendered inline as plain text. Add the `download` query parameter to
+        force the browser to download it as `openapi.yaml`.
+
+        Sending `Accept: application/json` returns the spec as parsed JSON.
+      security: []
+      parameters:
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Present to force a file download instead of inline rendering
+      responses:
+        '200':
+          description: The OpenAPI specification
+          content:
+            text/plain:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Specification file not found
   /register:
     post:
       tags: [Auth]
       summary: Register a new user
+      description: |
+        Creates a user, a tenant (auto-generated from the user's name), and
+        attaches the user as the tenant owner. Optionally provide `tenant_name`
+        and `tenant_slug` to control the created tenant.
       security: []
       requestBody:
         required: true
@@ -89,11 +143,19 @@ paths:
                 password_confirmation:
                   type: string
                   minLength: 8
+                tenant_name:
+                  type: string
+                  maxLength: 255
+                tenant_slug:
+                  type: string
+                  pattern: '^[a-z0-9-]+$'
               example:
                 name: Jane Doe
                 email: jane@example.com
                 password: password
                 password_confirmation: password
+                tenant_name: Acme Corp
+                tenant_slug: acme-corp
       responses:
         '201':
           description: Registered successfully
@@ -101,10 +163,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [user, token]
+                required: [user, tenant, token]
                 properties:
                   user:
                     $ref: '#/components/schemas/User'
+                  tenant:
+                    $ref: '#/components/schemas/Tenant'
                   token:
                     type: string
                     description: Bearer token to authenticate future requests
@@ -164,10 +228,39 @@ paths:
                       type: array
                       items:
                         type: string
+  /tenants:
+    get:
+      tags: [Tenants]
+      summary: List the tenants the authenticated user belongs to
+      description: |
+        Returns the user's tenants before an `X-Tenant` header is selected, so
+        this endpoint does **not** require the header. Each tenant includes the
+        user's `role` within it.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated list of the user's tenants
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Tenant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /logout:
     post:
       tags: [Auth]
       summary: Invalidate the current token
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       responses:
         '200':
           description: Logged out
@@ -187,6 +280,7 @@ paths:
       summary: List accounts
       description: Filter by type, currency, status, and search by name.
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
         - name: type
@@ -227,6 +321,8 @@ paths:
     post:
       tags: [Accounts]
       summary: Create an account
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       requestBody:
         required: true
         content:
@@ -249,6 +345,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /accounts/{account}:
     parameters:
+      - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/AccountId'
     get:
       tags: [Accounts]
@@ -301,12 +398,149 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /budgets:
+    get:
+      tags: [Budgets]
+      summary: List budgets
+      description: Filter by search, date range, tag, and account.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: search
+          in: query
+          description: Partial match against the budget name
+          schema:
+            type: string
+        - name: starts_at
+          in: query
+          description: Budget start date lower bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: ends_at
+          in: query
+          description: Budget end date upper bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: tag_id
+          in: query
+          description: Include budgets that have this tag
+          schema:
+            type: string
+            format: uuid
+        - name: account_id
+          in: query
+          description: Include budgets that are linked to this account
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Paginated list of budgets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Budget'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Budgets]
+      summary: Create a budget
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetStore'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Budget'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /budgets/{budget}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BudgetId'
+    get:
+      tags: [Budgets]
+      summary: Show a budget
+      responses:
+        '200':
+          description: Budget with linked accounts and tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Budget'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Budgets]
+      summary: Update a budget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Budget'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Budgets]
+      summary: Delete a budget
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /journals:
     get:
       tags: [Journals]
       summary: List journals
       description: Filter by status, source, and transaction date range.
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
         - name: status
@@ -350,6 +584,8 @@ paths:
     post:
       tags: [Journals]
       summary: Create a journal with lines and tags
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       requestBody:
         required: true
         content:
@@ -372,13 +608,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /journals/{journal}:
     parameters:
+      - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/JournalId'
     get:
       tags: [Journals]
       summary: Show a journal
       responses:
         '200':
-          description: Journal with lines, tags, and user
+          description: Journal with lines and tags
           content:
             application/json:
               schema:
@@ -462,6 +699,7 @@ paths:
       tags: [Journal Lines]
       summary: List journal lines
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -484,6 +722,8 @@ paths:
       tags: [Journal Lines]
       summary: Create a journal line
       description: Exactly one of `debit` or `credit` must be provided and positive. Lines can only be added to a journal with status `draft`.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       requestBody:
         required: true
         content:
@@ -506,6 +746,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /journal-lines/{journal_line}:
     parameters:
+      - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/JournalLineId'
     get:
       tags: [Journal Lines]
@@ -565,6 +806,7 @@ paths:
       tags: [Journal Tags]
       summary: List journal-tag relations
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -587,6 +829,8 @@ paths:
       tags: [Journal Tags]
       summary: Attach a tag to a journal
       description: Tags can only be attached to a journal with status `draft`.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       requestBody:
         required: true
         content:
@@ -621,6 +865,7 @@ paths:
       tags: [Tags]
       summary: List tags
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -642,6 +887,8 @@ paths:
     post:
       tags: [Tags]
       summary: Create a tag
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
       requestBody:
         required: true
         content:
@@ -672,6 +919,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /tags/{tag}:
     parameters:
+      - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/TagId'
     get:
       tags: [Tags]
@@ -737,6 +985,7 @@ paths:
       tags: [Audit Logs]
       summary: List audit logs
       parameters:
+        - $ref: '#/components/parameters/TenantId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -757,6 +1006,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /audit-logs/{audit_log}:
     parameters:
+      - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/AuditLogId'
     get:
       tags: [Audit Logs]
@@ -786,6 +1036,13 @@ components:
       bearerFormat: JWT
 
   parameters:
+    TenantId:
+      name: X-Tenant
+      in: header
+      required: true
+      description: Slug of the tenant to scope the request to
+      schema:
+        type: string
     Page:
       name: page
       in: query
@@ -833,6 +1090,13 @@ components:
         format: uuid
     AuditLogId:
       name: audit_log
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BudgetId:
+      name: budget
       in: path
       required: true
       schema:
@@ -948,6 +1212,33 @@ components:
           type: string
           format: date-time
           nullable: true
+        tenants:
+          type: array
+          description: Tenants the user belongs to (included when loaded)
+          items:
+            $ref: '#/components/schemas/Tenant'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+          description: Value sent in the X-Tenant header
+        role:
+          type: string
+          enum: [owner, member]
+          description: The user's role within the tenant (included when loaded)
         created_at:
           type: string
           format: date-time
@@ -1025,13 +1316,113 @@ components:
         currency: IDR
         status: active
 
-    Journal:
+    Budget:
       type: object
       properties:
         id:
           type: string
           format: uuid
-        user_id:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        amount:
+          type: string
+          description: Monetary value as a decimal string
+        starts_at:
+          type: string
+          format: date
+        ends_at:
+          type: string
+          format: date
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Account'
+        tags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tag'
+
+    BudgetStore:
+      type: object
+      required: [name, amount, starts_at, ends_at]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        starts_at:
+          type: string
+          format: date
+        ends_at:
+          type: string
+          format: date
+        account_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        tag_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+      example:
+        name: Groceries
+        amount: 1500.00
+        starts_at: '2026-08-01'
+        ends_at: '2026-08-31'
+        tag_ids:
+          - 019fe4f1-0000-0000-0000-000000000003
+
+    BudgetUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        starts_at:
+          type: string
+          format: date
+        ends_at:
+          type: string
+          format: date
+        account_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        tag_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    Journal:
+      type: object
+      properties:
+        id:
           type: string
           format: uuid
         transaction_date:
@@ -1057,10 +1448,6 @@ components:
         updated_at:
           type: string
           format: date-time
-        user:
-          nullable: true
-          allOf:
-            - $ref: '#/components/schemas/User'
         lines:
           type: array
           items:
@@ -1072,7 +1459,7 @@ components:
 
     JournalStore:
       type: object
-      required: [transaction_date, description, reference, status, source, lines]
+      required: [transaction_date, description, status, source, lines]
       properties:
         transaction_date:
           type: string
@@ -1083,6 +1470,7 @@ components:
         reference:
           type: string
           maxLength: 255
+          description: Optional. Auto-generated as JRN-YYYY-NNNN when omitted.
         status:
           type: string
           enum: [draft, posted, archived]
@@ -1112,6 +1500,7 @@ components:
               description:
                 type: string
                 maxLength: 255
+                description: Optional; stored as null when omitted.
         tags:
           type: array
           items:
@@ -1120,7 +1509,6 @@ components:
       example:
         transaction_date: '2026-08-01'
         description: Initial capital injection
-        reference: JRN-2026-0001
         status: posted
         source: manual
         lines:

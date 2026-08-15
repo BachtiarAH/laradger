@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -21,9 +22,9 @@ class StoreBudgetRequest extends FormRequest
             'starts_at' => ['required', 'date'],
             'ends_at' => ['required', 'date', 'after_or_equal:starts_at'],
             'account_ids' => ['sometimes', 'array'],
-            'account_ids.*' => ['uuid', Rule::exists('accounts', 'id')],
+            'account_ids.*' => ['uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
             'tag_ids' => ['sometimes', 'array'],
-            'tag_ids.*' => ['uuid', Rule::exists('tags', 'id')],
+            'tag_ids.*' => ['uuid', Rule::exists('tags', 'id')->where('tenant_id', TenantContext::id())],
         ];
     }
 }

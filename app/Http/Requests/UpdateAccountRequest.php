@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,7 +30,7 @@ class UpdateAccountRequest extends FormRequest
             'code' => ['prohibited'],
             'name' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in(['asset', 'liability', 'equity', 'income', 'expense'])],
-            'parent_id' => ['nullable', 'uuid', 'exists:accounts,id', Rule::notIn([$account->id])],
+            'parent_id' => ['nullable', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id()), Rule::notIn([$account->id])],
             'currency' => ['required', 'string', 'max:3'],
             'status' => ['required', Rule::in(['active', 'inactive'])],
         ];

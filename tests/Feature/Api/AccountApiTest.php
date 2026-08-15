@@ -5,11 +5,14 @@ use App\Models\User;
 use Laravel\Sanctum\Sanctum;
 
 beforeEach(function () {
-    Sanctum::actingAs(User::factory()->create());
+    $this->user = User::factory()->create();
+    $this->tenant = createTenantForUser($this->user);
+    Sanctum::actingAs($this->user);
+    $this->withHeader('X-Tenant', $this->tenant->slug);
 });
 
 test('accounts can be listed', function () {
-    Account::factory()->count(3)->create();
+    Account::factory()->count(3)->create(['tenant_id' => $this->tenant->id]);
 
     $this->getJson('/api/v1/accounts')
         ->assertOk()
@@ -17,8 +20,8 @@ test('accounts can be listed', function () {
 });
 
 test('accounts can be filtered by type', function () {
-    Account::factory()->create(['type' => 'asset']);
-    Account::factory()->create(['type' => 'liability']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'liability']);
 
     $this->getJson('/api/v1/accounts?type=asset')
         ->assertOk()
@@ -27,8 +30,8 @@ test('accounts can be filtered by type', function () {
 });
 
 test('accounts can be filtered by currency', function () {
-    Account::factory()->create(['currency' => 'IDR']);
-    Account::factory()->create(['currency' => 'USD']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'currency' => 'IDR']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'currency' => 'USD']);
 
     $this->getJson('/api/v1/accounts?currency=USD')
         ->assertOk()
@@ -37,8 +40,8 @@ test('accounts can be filtered by currency', function () {
 });
 
 test('accounts can be filtered by status', function () {
-    Account::factory()->create(['status' => 'active']);
-    Account::factory()->create(['status' => 'inactive']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'active']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'inactive']);
 
     $this->getJson('/api/v1/accounts?status=inactive')
         ->assertOk()
@@ -47,8 +50,8 @@ test('accounts can be filtered by status', function () {
 });
 
 test('accounts can be searched by name', function () {
-    Account::factory()->create(['name' => 'Petty Cash']);
-    Account::factory()->create(['name' => 'Accounts Receivable']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Petty Cash']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Accounts Receivable']);
 
     $this->getJson('/api/v1/accounts?search=petty')
         ->assertOk()
@@ -68,11 +71,11 @@ test('an account can be created', function () {
         ->assertJsonPath('data.code', 'AS-0001')
         ->assertJsonPath('data.name', 'Petty Cash');
 
-    $this->assertDatabaseHas('accounts', ['code' => 'AS-0001']);
+    $this->assertDatabaseHas('accounts', ['code' => 'AS-0001', 'tenant_id' => $this->tenant->id]);
 });
 
 test('account codes are sequential per type', function () {
-    Account::factory()->create(['code' => 'AS-0001', 'type' => 'asset']);
+    Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => 'AS-0001', 'type' => 'asset']);
 
     $response = $this->postJson('/api/v1/accounts', [
         'name' => 'Cash on Hand',
@@ -101,8 +104,9 @@ test('creating an account validates required fields', function () {
 });
 
 test('an account can be shown with parent and children', function () {
-    $parent = Account::factory()->create(['code' => '1000', 'name' => 'Assets', 'type' => 'asset']);
+    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1000', 'name' => 'Assets', 'type' => 'asset']);
     $child = Account::factory()->create([
+        'tenant_id' => $this->tenant->id,
         'code' => '1100',
         'name' => 'Cash',
         'type' => 'asset',
@@ -116,7 +120,7 @@ test('an account can be shown with parent and children', function () {
 });
 
 test('an account can be updated', function () {
-    $account = Account::factory()->create();
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
     $this->putJson("/api/v1/accounts/{$account->id}", [
         'name' => 'Updated Name',
@@ -127,7 +131,7 @@ test('an account can be updated', function () {
 });
 
 test('an account can be deleted', function () {
-    $account = Account::factory()->create();
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
     $this->deleteJson("/api/v1/accounts/{$account->id}")->assertNoContent();
 

@@ -3,7 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Journal;
-use App\Models\User;
+use App\Models\Tenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -19,7 +19,7 @@ class JournalFactory extends Factory
     public function definition(): array
     {
         return [
-            'user_id' => User::factory(),
+            'tenant_id' => Tenant::factory(),
             'transaction_date' => $this->faker->date(),
             'description' => $this->faker->sentence(),
             'status' => $this->faker->randomElement(['draft', 'posted', 'archived']),

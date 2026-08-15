@@ -37,8 +37,17 @@ class User extends Authenticatable
         return $this->hasMany(AuditLog::class);
     }
 
-    public function journals()
+    public function tenants()
     {
-        return $this->hasMany(Journal::class);
+        return $this->belongsToMany(Tenant::class, 'tenant_users')
+            ->withPivot('role')
+            ->withTimestamps();
+    }
+
+    public function belongsToTenant(string|Tenant $tenant): bool
+    {
+        $tenantId = $tenant instanceof Tenant ? $tenant->getKey() : $tenant;
+
+        return $this->tenants()->whereKey($tenantId)->exists();
     }
 }

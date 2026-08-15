@@ -2,20 +2,20 @@
 
 namespace Database\Seeders;
 
+use App\Models\AuditLog;
 use App\Models\Journal;
 use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
 
 class AuditLogSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        $tenantId = TenantContext::id();
         $user = User::first('id');
         $journal = Journal::first('id');
 
@@ -47,10 +47,10 @@ class AuditLogSeeder extends Seeder
         ];
 
         foreach ($auditLogs as $logData) {
-            $user->auditLogs()->create([
-                ...$logData,
-                'journal_id' => $journal->id,
-            ]);
+            AuditLog::firstOrCreate(
+                ['tenant_id' => $tenantId, 'user_id' => $user->id, 'action' => $logData['action']],
+                [...$logData, 'user_id' => $user->id, 'journal_id' => $journal?->id],
+            );
         }
     }
 }

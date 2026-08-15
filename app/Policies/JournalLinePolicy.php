@@ -17,7 +17,8 @@ class JournalLinePolicy
 
     public function view(User $user, JournalLine $journalLine): bool
     {
-        return $journalLine->journal?->user_id === $user->id;
+        return $journalLine->journal?->tenant_id
+            && $user->belongsToTenant($journalLine->journal->tenant_id);
     }
 
     public function create(User $user): bool
@@ -27,19 +28,22 @@ class JournalLinePolicy
 
     public function update(User $user, JournalLine $journalLine): bool
     {
-        return $journalLine->journal?->user_id === $user->id
+        return $journalLine->journal?->tenant_id
+            && $user->belongsToTenant($journalLine->journal->tenant_id)
             && $journalLine->journal?->status === 'draft';
     }
 
     public function delete(User $user, JournalLine $journalLine): bool
     {
-        return $journalLine->journal?->user_id === $user->id
+        return $journalLine->journal?->tenant_id
+            && $user->belongsToTenant($journalLine->journal->tenant_id)
             && $journalLine->journal?->status === 'draft';
     }
 
     public function restore(User $user, JournalLine $journalLine): bool
     {
-        return $journalLine->journal?->user_id === $user->id
+        return $journalLine->journal?->tenant_id
+            && $user->belongsToTenant($journalLine->journal->tenant_id)
             && $journalLine->journal?->status === 'draft';
     }
 

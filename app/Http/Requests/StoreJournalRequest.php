@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Journal;
+use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -27,17 +28,17 @@ class StoreJournalRequest extends FormRequest
         return [
             'transaction_date' => ['required', 'date'],
             'description' => ['required', 'string', 'max:255'],
-            'reference' => ['required', 'string', 'max:255', 'unique:journals,reference'],
+            'reference' => ['nullable', 'string', 'max:255', Rule::unique('journals', 'reference')->where('tenant_id', TenantContext::id())],
             'status' => ['required', Rule::in(['draft', 'posted', 'archived'])],
             'source' => ['required', Rule::in(['manual', 'imported', 'system'])],
-            'reverse_from_id' => ['nullable', 'uuid', 'exists:journals,id'],
+            'reverse_from_id' => ['nullable', 'uuid', Rule::exists('journals', 'id')->where('tenant_id', TenantContext::id())],
             'lines' => ['required', 'array', 'min:1'],
-            'lines.*.account_id' => ['required', 'uuid', 'exists:accounts,id'],
+            'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],
             'lines.*.credit' => ['nullable', 'numeric', 'min:0'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
             'tags' => ['nullable', 'array'],
-            'tags.*' => ['uuid', 'exists:tags,id'],
+            'tags.*' => ['uuid', Rule::exists('tags', 'id')->where('tenant_id', TenantContext::id())],
         ];
     }
 }

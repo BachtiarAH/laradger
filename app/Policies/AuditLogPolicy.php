@@ -17,7 +17,7 @@ class AuditLogPolicy
 
     public function view(User $user, AuditLog $auditLog): bool
     {
-        return $auditLog->user_id === $user->id;
+        return $user->belongsToTenant($auditLog->tenant_id);
     }
 
     public function create(User $user): bool

@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
 use App\Http\Controllers\Api\JournalTagController;
 use App\Http\Controllers\Api\TagController;
+use App\Http\Controllers\Api\TenantController;
 use Illuminate\Support\Facades\Route;
 use Symfony\Component\Yaml\Yaml;
 
@@ -24,7 +25,13 @@ Route::get('/docs', function () {
         return response()->json(Yaml::parse($yaml));
     }
 
-    return response($yaml, 200)->header('Content-Type', 'application/yaml; charset=utf-8');
+    if (request()->has('download')) {
+        return response($yaml, 200)
+            ->header('Content-Type', 'application/yaml; charset=utf-8')
+            ->header('Content-Disposition', 'attachment; filename="openapi.yaml"');
+    }
+
+    return response($yaml, 200)->header('Content-Type', 'text/plain; charset=utf-8');
 });
 
 Route::prefix('v1')->group(function () {
@@ -32,6 +39,10 @@ Route::prefix('v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
 
     Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/tenants', [TenantController::class, 'index']);
+    });
+
+    Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
 
         Route::apiResource('accounts', AccountController::class);

@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\AuditLog;
 use App\Models\Journal;
+use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -20,6 +21,7 @@ class AuditLogFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => Tenant::factory(),
             'user_id' => User::factory(),
             'action' => $this->faker->word(),
             'before' => null,

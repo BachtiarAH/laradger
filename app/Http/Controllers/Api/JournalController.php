@@ -32,7 +32,7 @@ class JournalController extends Controller
     {
         $this->authorize('create', Journal::class);
 
-        $journal = $request->user()->journals()->create($request->safe()->except(['lines', 'tags']));
+        $journal = Journal::create($request->safe()->except(['lines', 'tags']));
 
         foreach ($request->validated('lines', []) as $line) {
             $journal->lines()->create($line);
@@ -49,7 +49,7 @@ class JournalController extends Controller
     {
         $this->authorize('view', $journal);
 
-        return new JournalResource($journal->load('lines.account', 'tags', 'user'));
+        return new JournalResource($journal->load('lines.account', 'tags'));
     }
 
     public function update(UpdateJournalRequest $request, Journal $journal): JournalResource
@@ -85,7 +85,7 @@ class JournalController extends Controller
     {
         $this->authorize('reverse', $journal);
 
-        $reversal = $journal->user->journals()->create([
+        $reversal = Journal::create([
             'transaction_date' => now(),
             'description' => "Reversal of {$journal->reference}",
             'reference' => 'REV-'.$journal->reference.'-'.Str::upper(Str::random(6)),

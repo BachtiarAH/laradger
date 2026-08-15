@@ -17,7 +17,7 @@ class TagPolicy
 
     public function view(User $user, Tag $tag): bool
     {
-        return true;
+        return $user->belongsToTenant($tag->tenant_id);
     }
 
     public function create(User $user): bool
@@ -27,17 +27,17 @@ class TagPolicy
 
     public function update(User $user, Tag $tag): bool
     {
-        return true;
+        return $user->belongsToTenant($tag->tenant_id);
     }
 
     public function delete(User $user, Tag $tag): bool
     {
-        return true;
+        return $user->belongsToTenant($tag->tenant_id);
     }
 
     public function restore(User $user, Tag $tag): bool
     {
-        return true;
+        return $user->belongsToTenant($tag->tenant_id);
     }
 
     public function forceDelete(User $user, Tag $tag): bool

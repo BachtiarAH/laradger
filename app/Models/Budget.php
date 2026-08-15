@@ -2,17 +2,26 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Database\Factories\BudgetFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['user_id', 'name', 'description', 'amount', 'starts_at', 'ends_at'])]
+#[Fillable(['tenant_id', 'user_id', 'name', 'description', 'amount', 'starts_at', 'ends_at'])]
 class Budget extends Model
 {
     /** @use HasFactory<BudgetFactory> */
-    use HasFactory, HasUuids;
+    use BelongsToTenant, HasFactory, HasUuids;
+
+    protected function casts(): array
+    {
+        return [
+            'starts_at' => 'date',
+            'ends_at' => 'date',
+        ];
+    }
 
     public function user()
     {

@@ -17,7 +17,8 @@ class JournalTagPolicy
 
     public function view(User $user, JournalTag $journalTag): bool
     {
-        return $journalTag->journal?->user_id === $user->id;
+        return $journalTag->journal?->tenant_id
+            && $user->belongsToTenant($journalTag->journal->tenant_id);
     }
 
     public function create(User $user): bool
@@ -27,17 +28,20 @@ class JournalTagPolicy
 
     public function update(User $user, JournalTag $journalTag): bool
     {
-        return $journalTag->journal?->user_id === $user->id;
+        return $journalTag->journal?->tenant_id
+            && $user->belongsToTenant($journalTag->journal->tenant_id);
     }
 
     public function delete(User $user, JournalTag $journalTag): bool
     {
-        return $journalTag->journal?->user_id === $user->id;
+        return $journalTag->journal?->tenant_id
+            && $user->belongsToTenant($journalTag->journal->tenant_id);
     }
 
     public function restore(User $user, JournalTag $journalTag): bool
     {
-        return $journalTag->journal?->user_id === $user->id;
+        return $journalTag->journal?->tenant_id
+            && $user->belongsToTenant($journalTag->journal->tenant_id);
     }
 
     public function forceDelete(User $user, JournalTag $journalTag): bool

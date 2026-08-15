@@ -5,15 +5,14 @@ namespace Database\Seeders;
 use App\Models\Account;
 use App\Models\Budget;
 use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
 
 class BudgetSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     public function run(): void
     {
+        $tenantId = TenantContext::id();
         $user = User::query()->where('email', 'test@example.com')->first();
 
         if (! $user) {
@@ -45,17 +44,17 @@ class BudgetSeeder extends Seeder
             $accountCodes = $data['account_codes'];
             unset($data['account_codes']);
 
-            $budget = Budget::create([
-                ...$data,
-                'user_id' => $user->id,
-            ]);
+            $budget = Budget::firstOrCreate(
+                ['tenant_id' => $tenantId, 'name' => $data['name']],
+                [...$data, 'user_id' => $user->id],
+            );
 
             $accountIds = collect($accountCodes)
                 ->map(fn (string $code) => $expenseAccounts->get($code))
                 ->filter()
                 ->values();
 
-            $budget->accounts()->sync($accountIds);
+            $budget->accounts()->syncWithoutDetaching($accountIds);
         }
     }
 }

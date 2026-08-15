@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
+use Carbon\CarbonInterface;
 use Database\Factories\JournalFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,10 +12,10 @@ use Illuminate\Database\Eloquent\Model;
 class Journal extends Model
 {
     /** @use HasFactory<JournalFactory> */
-    use HasFactory, HasUuids;
+    use BelongsToTenant, HasFactory, HasUuids;
 
     protected $fillable = [
-        'user_id',
+        'tenant_id',
         'reverse_from_id',
         'transaction_date',
         'description',
@@ -29,9 +31,27 @@ class Journal extends Model
         ];
     }
 
-    public function user()
+    protected static function booted(): void
     {
-        return $this->belongsTo(User::class);
+        static::creating(function (Journal $journal) {
+            if (blank($journal->reference)) {
+                $journal->reference = static::nextReference($journal->transaction_date);
+            }
+        });
+    }
+
+    public static function nextReference(?CarbonInterface $transactionDate = null): string
+    {
+        $year = $transactionDate?->year ?? now()->year;
+
+        $max = static::query()
+            ->whereYear('transaction_date', $year)
+            ->where('reference', 'like', "JRN-{$year}-%")
+            ->max('reference');
+
+        $sequence = $max ? ((int) substr($max, (int) strrpos($max, '-') + 1)) + 1 : 1;
+
+        return sprintf('JRN-%s-%04d', $year, $sequence);
     }
 
     public function lines()

@@ -3,8 +3,10 @@
 namespace App\Http\Requests;
 
 use App\Models\JournalTag;
+use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreJournalTagRequest extends FormRequest
 {
@@ -24,8 +26,8 @@ class StoreJournalTagRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'journal_id' => ['required', 'uuid', 'exists:journals,id'],
-            'tag_id' => ['required', 'uuid', 'exists:tags,id'],
+            'journal_id' => ['required', 'uuid', Rule::exists('journals', 'id')->where('tenant_id', TenantContext::id())],
+            'tag_id' => ['required', 'uuid', Rule::exists('tags', 'id')->where('tenant_id', TenantContext::id())],
         ];
     }
 }

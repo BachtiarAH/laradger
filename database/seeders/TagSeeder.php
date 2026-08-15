@@ -3,18 +3,18 @@
 namespace Database\Seeders;
 
 use App\Models\Tag;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
 
 class TagSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        $tenantId = TenantContext::id();
+
         $tags = [
             ['name' => 'Priority', 'type' => 'priority'],
             ['name' => 'Recurring', 'type' => 'recurring'],
@@ -24,7 +24,10 @@ class TagSeeder extends Seeder
         ];
 
         foreach ($tags as $tagData) {
-            Tag::create($tagData);
+            Tag::firstOrCreate(
+                ['tenant_id' => $tenantId, 'name' => $tagData['name']],
+                $tagData,
+            );
         }
     }
 }

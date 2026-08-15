@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Account;
+use App\Models\Tenant;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -18,6 +19,7 @@ class AccountFactory extends Factory
     public function definition(): array
     {
         return [
+            'tenant_id' => Tenant::factory(),
             'code' => $this->faker->unique()->bothify('ACC-###??'),
             'name' => $this->faker->word(),
             'type' => $this->faker->randomElement(['asset', 'liability', 'equity', 'income', 'expense']),

@@ -17,7 +17,7 @@ class AccountPolicy
 
     public function view(User $user, Account $account): bool
     {
-        return true;
+        return $user->belongsToTenant($account->tenant_id);
     }
 
     public function create(User $user): bool
@@ -27,17 +27,17 @@ class AccountPolicy
 
     public function update(User $user, Account $account): bool
     {
-        return true;
+        return $user->belongsToTenant($account->tenant_id);
     }
 
     public function delete(User $user, Account $account): bool
     {
-        return true;
+        return $user->belongsToTenant($account->tenant_id);
     }
 
     public function restore(User $user, Account $account): bool
     {
-        return true;
+        return $user->belongsToTenant($account->tenant_id);
     }
 
     public function forceDelete(User $user, Account $account): bool

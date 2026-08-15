@@ -3,19 +3,19 @@
 namespace Database\Seeders;
 
 use App\Models\Account;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Arr;
 
 class AccountSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
+        $tenantId = TenantContext::id();
+
         $chartOfAccounts = [
             [
                 'code' => '1000',
@@ -77,10 +77,16 @@ class AccountSeeder extends Seeder
         ];
 
         foreach ($chartOfAccounts as $accountData) {
-            $parent = Account::create(Arr::except($accountData, ['children']));
+            $parent = Account::firstOrCreate(
+                Arr::only($accountData, ['tenant_id', 'code']),
+                Arr::except($accountData, ['children']),
+            );
 
             foreach ($accountData['children'] as $childData) {
-                $parent->children()->create($childData);
+                $parent->children()->firstOrCreate(
+                    Arr::only($childData, ['tenant_id', 'code']),
+                    Arr::except($childData, ['tenant_id', 'code']),
+                );
             }
         }
     }

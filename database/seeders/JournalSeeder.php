@@ -2,20 +2,18 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\Journal;
+use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
 
 class JournalSeeder extends Seeder
 {
-    use WithoutModelEvents;
-
     /**
      * Run the database seeds.
      */
     public function run(): void
     {
-        $user = User::first();
+        $tenantId = TenantContext::id();
 
         $journals = [
             [
@@ -56,7 +54,10 @@ class JournalSeeder extends Seeder
         ];
 
         foreach ($journals as $journalData) {
-            $user->journals()->create($journalData);
+            Journal::firstOrCreate(
+                ['tenant_id' => $tenantId, 'reference' => $journalData['reference']],
+                $journalData,
+            );
         }
     }
 }

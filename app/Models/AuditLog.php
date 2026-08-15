@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Database\Factories\AuditLogFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,9 +11,10 @@ use Illuminate\Database\Eloquent\Model;
 class AuditLog extends Model
 {
     /** @use HasFactory<AuditLogFactory> */
-    use HasFactory, HasUuids;
+    use BelongsToTenant, HasFactory, HasUuids;
 
     protected $fillable = [
+        'tenant_id',
         'user_id',
         'action',
         'before',

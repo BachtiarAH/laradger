@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -47,4 +49,12 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+function createTenantForUser(User $user): Tenant
+{
+    $tenant = Tenant::factory()->create();
+    $tenant->users()->attach($user, ['role' => 'owner']);
+
+    return $tenant;
 }

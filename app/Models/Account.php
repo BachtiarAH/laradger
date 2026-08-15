@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 class Account extends Model
 {
     /** @use HasFactory<AccountFactory> */
-    use HasFactory, HasUuids;
+    use BelongsToTenant, HasFactory, HasUuids;
 
     public const TYPE_CODE_PREFIXES = [
         'asset' => 'AS',
@@ -21,6 +22,7 @@ class Account extends Model
     ];
 
     protected $fillable = [
+        'tenant_id',
         'code',
         'name',
         'type',

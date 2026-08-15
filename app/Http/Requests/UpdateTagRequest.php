@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -19,7 +20,7 @@ class UpdateTagRequest extends FormRequest
         $tag = $this->route('tag');
 
         return [
-            'name' => ['required', 'string', 'max:255', Rule::unique('tags', 'name')->ignore($tag->id)],
+            'name' => ['required', 'string', 'max:255', Rule::unique('tags', 'name')->where('tenant_id', TenantContext::id())->ignore($tag->id)],
             'type' => ['required', Rule::in(['priority', 'recurring', 'vendor', 'tax', 'transfer'])],
             'description' => ['nullable', 'string'],
         ];
