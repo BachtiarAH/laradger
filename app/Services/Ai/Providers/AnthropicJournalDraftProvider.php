@@ -59,4 +59,17 @@ class AnthropicJournalDraftProvider extends AbstractJournalDraftProvider
 
         return $this->parseDraft($content);
     }
+
+    /**
+     * @return array<string, int>
+     */
+    protected function extractUsage(Response $response): array
+    {
+        $usage = $response->json('usage') ?? [];
+
+        return [
+            'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
+            'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
+        ];
+    }
 }

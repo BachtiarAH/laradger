@@ -6,6 +6,8 @@ use Illuminate\Contracts\Support\Arrayable;
 
 class JournalDraft implements Arrayable
 {
+    public ?string $record_id = null;
+
     /**
      * @param  array<int, array{account_name: string, account_type: string, debit: ?string, credit: ?string, description: ?string}>  $lines
      * @param  array<int, string>  $tags
@@ -48,6 +50,7 @@ class JournalDraft implements Arrayable
     public function toArray(): array
     {
         return [
+            'record_id' => $this->record_id,
             'transaction_date' => $this->transaction_date,
             'description' => $this->description,
             'lines' => $this->lines,

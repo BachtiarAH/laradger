@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Ai\AiCallRecordingService;
+use App\Services\Ai\Contracts\AiCallRecorder;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +13,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(AiCallRecorder::class, function ($app) {
+            return $app->make(AiCallRecordingService::class);
+        });
     }
 
     /**

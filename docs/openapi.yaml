@@ -663,7 +663,11 @@ paths:
         provider is tried automatically.
 
         This endpoint does **not** persist anything — it only returns a draft.
-        Use `POST /journals` to save the confirmed entry.
+        The draft includes a `record_id`. Use `POST /journals` to save the
+        confirmed entry, sending `ai_record_id` back to record the confirmation.
+
+        Every call (prompt, response, token usage, latency) is recorded to
+        `storage/logs/ai-calls.jsonl` unless recording is disabled.
       parameters:
         - $ref: '#/components/parameters/TenantId'
       requestBody:
@@ -1525,6 +1529,11 @@ components:
     JournalDraft:
       type: object
       properties:
+        record_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Unique id of the recorded AI call. Send it back as `ai_record_id` when confirming via POST /journals.
         transaction_date:
           type: string
           format: date
@@ -1621,6 +1630,11 @@ components:
           type: string
           format: uuid
           nullable: true
+        ai_record_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The `record_id` returned by POST /journals/ai-draft, used to record the confirmation.
         lines:
           type: array
           minItems: 1
