@@ -255,6 +255,48 @@ paths:
                           $ref: '#/components/schemas/Tenant'
         '401':
           $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Tenants]
+      summary: Create a tenant for the authenticated user
+      description: |
+        Creates a new tenant (accounting book) and attaches the authenticated
+        user as its `owner`. This endpoint does **not** require the `X-Tenant`
+        header because it is not scoped to a selected tenant.
+
+        If `slug` is omitted it is auto-generated from the name plus a short
+        random suffix (mirroring registration).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                slug:
+                  type: string
+                  pattern: '^[a-z0-9-]+$'
+                  description: Optional; auto-generated when omitted.
+              example:
+                name: Acme Corp
+                slug: acme-corp
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tenant'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /logout:
     post:
       tags: [Auth]
@@ -606,6 +648,67 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /journals/ai-draft:
+    post:
+      tags: [Journals]
+      summary: Generate a draft journal from a natural-language statement
+      description: |
+        Sends the statement to the configured AI provider and returns a
+        structured draft journal (transaction date, description, journal lines
+        with debit/credit amounts, and tag suggestions) that a user can review
+        and edit before confirming.
+
+        The provider is selected via configuration and can be changed without
+        code changes. If the default provider fails, a configured fallback
+        provider is tried automatically.
+
+        This endpoint does **not** persist anything — it only returns a draft.
+        Use `POST /journals` to save the confirmed entry.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [statement]
+              properties:
+                statement:
+                  type: string
+                  maxLength: 2000
+                  description: Human-language description of the transaction
+              example:
+                statement: Spent $45.50 on groceries at the supermarket with cash
+      responses:
+        '200':
+          description: Draft journal generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JournalDraft'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          description: The AI provider is unavailable or returned an invalid draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
   /journals/{journal}:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -1418,6 +1521,43 @@ components:
           items:
             type: string
             format: uuid
+
+    JournalDraft:
+      type: object
+      properties:
+        transaction_date:
+          type: string
+          format: date
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              account_name:
+                type: string
+                description: Suggested account name from the tenant's chart of accounts
+              account_type:
+                type: string
+                enum: [asset, liability, equity, income, expense]
+              debit:
+                type: string
+                nullable: true
+                description: Monetary value as a decimal string
+              credit:
+                type: string
+                nullable: true
+                description: Monetary value as a decimal string
+              description:
+                type: string
+                nullable: true
+        tags:
+          type: array
+          items:
+            type: string
 
     Journal:
       type: object

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AccountController;
+use App\Http\Controllers\Api\AiJournalDraftController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
@@ -40,6 +41,7 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/tenants', [TenantController::class, 'index']);
+        Route::post('/tenants', [TenantController::class, 'store']);
     });
 
     Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
@@ -47,6 +49,7 @@ Route::prefix('v1')->group(function () {
 
         Route::apiResource('accounts', AccountController::class);
         Route::apiResource('journals', JournalController::class);
+        Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);
         Route::post('journals/{journal}/reverse', [JournalController::class, 'reverse']);
         Route::apiResource('journal-lines', JournalLineController::class);
         Route::apiResource('journal-tags', JournalTagController::class)->only(['index', 'store']);
