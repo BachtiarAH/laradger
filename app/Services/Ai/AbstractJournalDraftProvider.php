@@ -75,6 +75,13 @@ abstract class AbstractJournalDraftProvider implements JournalDraftProvider
             $draft = $this->parseResponse($response);
             $draft->record_id = $record->id;
 
+            Log::info('AI provider returned a draft.', [
+                'provider' => static::name(),
+                'model' => $this->config['model'] ?? 'default',
+                'prompt' => $record->prompt,
+                'draft' => $draft->toArray(),
+            ]);
+
             $this->recorder?->record(
                 $record->finish(
                     latencyMs: $this->elapsedMs($start),
@@ -90,6 +97,7 @@ abstract class AbstractJournalDraftProvider implements JournalDraftProvider
             Log::error('AI provider returned an error.', [
                 'provider' => static::name(),
                 'model' => $this->config['model'] ?? 'default',
+                'prompt' => $record->prompt,
                 'error' => $e->getMessage(),
                 'raw_response' => $this->lastResponse?->json(),
             ]);
@@ -108,6 +116,7 @@ abstract class AbstractJournalDraftProvider implements JournalDraftProvider
             Log::error('The AI provider could not be reached.', [
                 'provider' => static::name(),
                 'model' => $this->config['model'] ?? 'default',
+                'prompt' => $record->prompt,
                 'error' => $e->getMessage(),
             ]);
 
@@ -124,6 +133,7 @@ abstract class AbstractJournalDraftProvider implements JournalDraftProvider
             Log::error('The AI provider request failed.', [
                 'provider' => static::name(),
                 'model' => $this->config['model'] ?? 'default',
+                'prompt' => $record->prompt,
                 'exception' => get_class($e),
                 'error' => $e->getMessage(),
             ]);

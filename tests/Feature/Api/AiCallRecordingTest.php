@@ -358,6 +358,7 @@ test('logs the error and raw response when the provider fails', function () {
             'AI provider returned an error.',
             Mockery::on(function ($context) {
                 return $context['provider'] === 'openai'
+                    && $context['prompt'] !== ''
                     && $context['raw_response']['error']['message'] === 'Invalid API key';
             })
         );
