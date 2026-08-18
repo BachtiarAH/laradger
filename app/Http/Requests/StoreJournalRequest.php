@@ -32,6 +32,7 @@ class StoreJournalRequest extends FormRequest
             'status' => ['required', Rule::in(['draft', 'posted', 'archived'])],
             'source' => ['required', Rule::in(['manual', 'imported', 'system'])],
             'reverse_from_id' => ['nullable', 'uuid', Rule::exists('journals', 'id')->where('tenant_id', TenantContext::id())],
+            'ai_record_id' => ['nullable', 'uuid'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],

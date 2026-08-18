@@ -7,11 +7,11 @@ use App\Services\Ai\Exceptions\AiProviderException;
 use App\Services\Ai\JournalDraft;
 use Illuminate\Http\Client\Response;
 
-class OpenAiJournalDraftProvider extends AbstractJournalDraftProvider
+class OpenAiCompatibleJournalDraftProvider extends AbstractJournalDraftProvider
 {
     public static function name(): string
     {
-        return 'openai';
+        return 'openai_compatible';
     }
 
     /**
@@ -26,6 +26,10 @@ class OpenAiJournalDraftProvider extends AbstractJournalDraftProvider
                 [
                     'role' => 'system',
                     'content' => $this->buildPrompt($statement, $accounts),
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $statement,
                 ],
             ],
             'response_format' => ['type' => 'json_object'],
@@ -44,7 +48,7 @@ class OpenAiJournalDraftProvider extends AbstractJournalDraftProvider
 
     protected function endpoint(): string
     {
-        return '/v1/chat/completions';
+        return $this->config['endpoint'] ?? '/v1/chat/completions';
     }
 
     protected function extractDraft(Response $response): JournalDraft

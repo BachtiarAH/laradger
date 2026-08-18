@@ -16,6 +16,7 @@ describe('ai draft generation', function () {
         config(['ai.providers.openai.api_key' => 'test-key']);
         config(['ai.providers.openai.base_uri' => 'https://api.openai.com']);
         config(['ai.providers.anthropic.api_key' => null]);
+        config(['ai.providers.openai_compatible.api_key' => null]);
     });
 
     test('returns a draft journal generated from the statement', function () {

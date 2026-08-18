@@ -7,12 +7,17 @@ use App\Http\Requests\StoreJournalRequest;
 use App\Http\Requests\UpdateJournalRequest;
 use App\Http\Resources\JournalResource;
 use App\Models\Journal;
+use App\Services\Ai\Contracts\AiCallRecorder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Str;
 
 class JournalController extends Controller
 {
+    public function __construct(
+        private readonly AiCallRecorder $aiCallRecorder,
+    ) {}
+
     public function index(): AnonymousResourceCollection
     {
         $this->authorize('viewAny', Journal::class);
@@ -32,13 +37,17 @@ class JournalController extends Controller
     {
         $this->authorize('create', Journal::class);
 
-        $journal = Journal::create($request->safe()->except(['lines', 'tags']));
+        $journal = Journal::create($request->safe()->except(['lines', 'tags', 'ai_record_id']));
 
         foreach ($request->validated('lines', []) as $line) {
             $journal->lines()->create($line);
         }
 
         $journal->tags()->sync($request->validated('tags', []));
+
+        if ($recordId = $request->validated('ai_record_id')) {
+            $this->aiCallRecorder->confirm($recordId, $journal);
+        }
 
         return (new JournalResource($journal->load('lines.account', 'tags')))
             ->response()

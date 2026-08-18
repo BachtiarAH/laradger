@@ -2,9 +2,11 @@
 
 namespace App\Services\Ai;
 
+use App\Services\Ai\Contracts\AiCallRecorder;
 use App\Services\Ai\Contracts\JournalDraftProvider;
 use App\Services\Ai\Exceptions\AiProviderException;
 use App\Services\Ai\Providers\AnthropicJournalDraftProvider;
+use App\Services\Ai\Providers\OpenAiCompatibleJournalDraftProvider;
 use App\Services\Ai\Providers\OpenAiJournalDraftProvider;
 use Illuminate\Support\Manager;
 
@@ -16,6 +18,7 @@ class JournalDraftService extends Manager
     private const PROVIDERS = [
         'openai' => OpenAiJournalDraftProvider::class,
         'anthropic' => AnthropicJournalDraftProvider::class,
+        'openai_compatible' => OpenAiCompatibleJournalDraftProvider::class,
     ];
 
     public function getDefaultDriver(): string
@@ -80,6 +83,11 @@ class JournalDraftService extends Manager
         return $this->buildProvider(AnthropicJournalDraftProvider::class, 'anthropic');
     }
 
+    protected function createOpenAiCompatibleDriver(): JournalDraftProvider
+    {
+        return $this->buildProvider(OpenAiCompatibleJournalDraftProvider::class, 'openai_compatible');
+    }
+
     /**
      * @param  class-string<JournalDraftProvider>  $provider
      */
@@ -91,6 +99,9 @@ class JournalDraftService extends Manager
             );
         }
 
-        return new $provider($this->config->get("ai.providers.{$name}"));
+        return new $provider(
+            $this->config->get("ai.providers.{$name}"),
+            app(AiCallRecorder::class),
+        );
     }
 }

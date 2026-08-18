@@ -44,6 +44,48 @@ return [
             'timeout' => (int) env('AI_ANTHROPIC_TIMEOUT', 30),
         ],
 
+        'openai_compatible' => [
+            'base_uri' => env('AI_COMPATIBLE_BASE_URI', 'https://api.openai.com'),
+            'api_key' => env('AI_COMPATIBLE_API_KEY'),
+            'model' => env('AI_COMPATIBLE_MODEL', 'gpt-4o-mini'),
+            'endpoint' => env('AI_COMPATIBLE_ENDPOINT', '/v1/chat/completions'),
+            'timeout' => (int) env('AI_COMPATIBLE_TIMEOUT', 30),
+        ],
+
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | System Prompt
+    |--------------------------------------------------------------------------
+    |
+    | The system prompt sent to the provider when generating a draft journal.
+    | Leave empty to use the built-in default prompt. The placeholders
+    | :accounts and :statement are replaced at call time.
+    |
+    */
+
+    'prompt' => env('AI_PROMPT', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Call Recording
+    |--------------------------------------------------------------------------
+    |
+    | Records every AI call (prompt, response, token usage, latency) plus the
+    | confirmation event when a draft is saved as a journal. The driver is
+    | swappable: the default "file" driver appends one JSON line per event to
+    | the configured path. Swap to another backend by implementing the
+    | App\Services\Ai\Contracts\AiCallRecorder contract.
+    |
+    */
+
+    'recording' => [
+        'enabled' => (bool) env('AI_RECORDING_ENABLED', true),
+        'driver' => env('AI_RECORDING_DRIVER', 'file'),
+        'file' => [
+            'path' => env('AI_RECORDING_PATH', 'logs/ai-calls.jsonl'),
+        ],
     ],
 
 ];
