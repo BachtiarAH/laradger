@@ -4,13 +4,28 @@ use App\Models\User;
 use Laravel\Sanctum\Sanctum;
 
 test('guests are redirected to login for protected endpoints', function () {
-    $this->getJson('/api/v1/accounts')->assertUnauthorized();
+    $this->getJson('/api/v1/acme/accounts')->assertUnauthorized();
 });
 
 test('guests get a json 401 without the json accept header', function () {
-    $this->get('/api/v1/accounts')
+    $this->get('/api/v1/acme/accounts')
         ->assertUnauthorized()
         ->assertJson(['message' => 'Unauthenticated.']);
+});
+
+test('an invalid token returns 401 even when the tenant slug does not exist', function () {
+    $this->withToken('bogus-token')
+        ->getJson('/api/v1/nonexistent-slug/accounts')
+        ->assertUnauthorized();
+});
+
+test('a valid token with a non-existent tenant slug returns 404 so the client can handle it', function () {
+    $user = User::factory()->create();
+    Sanctum::actingAs($user);
+
+    $this->getJson('/api/v1/nonexistent-slug/accounts')
+        ->assertNotFound()
+        ->assertJson(['message' => 'Tenant not found.']);
 });
 
 test('a user can register and receive a token', function () {
@@ -91,6 +106,5 @@ test('a user can log out', function () {
     $tenant = createTenantForUser($user);
     Sanctum::actingAs($user);
 
-    $this->withHeader('X-Tenant', $tenant->slug)
-        ->postJson('/api/v1/logout')->assertOk();
+    $this->postJson("/api/v1/{$tenant->slug}/logout")->assertOk();
 });

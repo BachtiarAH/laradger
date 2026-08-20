@@ -10,7 +10,6 @@ describe('ai draft generation', function () {
         $this->user = User::factory()->create();
         $this->tenant = createTenantForUser($this->user);
         Sanctum::actingAs($this->user);
-        $this->withHeader('X-Tenant', $this->tenant->slug);
 
         config(['ai.default' => 'openai']);
         config(['ai.providers.openai.api_key' => 'test-key']);
@@ -45,7 +44,7 @@ describe('ai draft generation', function () {
             ]),
         ]);
 
-        $this->postJson('/api/v1/journals/ai-draft', [
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
             'statement' => 'Spent $45.50 on groceries at the supermarket with cash',
         ])->assertOk()
             ->assertJsonPath('data.transaction_date', '2026-08-17')
@@ -63,7 +62,7 @@ describe('ai draft generation', function () {
     });
 
     test('statement is required', function () {
-        $this->postJson('/api/v1/journals/ai-draft', [])
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [])
             ->assertStatus(422)
             ->assertJsonValidationErrors(['statement']);
     });
@@ -71,7 +70,7 @@ describe('ai draft generation', function () {
     test('returns 502 when the provider is not configured', function () {
         config(['ai.providers.openai.api_key' => null]);
 
-        $this->postJson('/api/v1/journals/ai-draft', [
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
             'statement' => 'Spent $10 on coffee',
         ])->assertStatus(502)
             ->assertJsonValidationErrors(['statement']);
@@ -94,7 +93,7 @@ describe('ai draft generation', function () {
             ]),
         ]);
 
-        $this->postJson('/api/v1/journals/ai-draft', [
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
             'statement' => 'Spent $10 on coffee',
         ])->assertStatus(502)
             ->assertJsonValidationErrors(['statement']);
@@ -105,7 +104,7 @@ describe('ai draft generation', function () {
             'https://api.openai.com/*' => Http::response([], 500),
         ]);
 
-        $this->postJson('/api/v1/journals/ai-draft', [
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
             'statement' => 'Spent $10 on coffee',
         ])->assertStatus(502)
             ->assertJsonValidationErrors(['statement']);
@@ -133,7 +132,7 @@ describe('ai draft generation', function () {
             ]),
         ]);
 
-        $this->postJson('/api/v1/journals/ai-draft', [
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
             'statement' => 'Spent $10 on coffee',
         ])->assertOk()
             ->assertJsonPath('data.description', 'Coffee purchase')
@@ -142,7 +141,7 @@ describe('ai draft generation', function () {
 });
 
 test('guests cannot generate an ai draft', function () {
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson('/api/v1/acme/journals/ai-draft', [
         'statement' => 'Spent $10 on coffee',
     ])->assertUnauthorized();
 });

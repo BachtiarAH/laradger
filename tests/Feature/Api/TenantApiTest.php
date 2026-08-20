@@ -29,7 +29,7 @@ test('a user can list their tenants', function () {
         ->toHaveKey($second->id, 'member');
 });
 
-test('listing tenants does not require the X-Tenant header', function () {
+test('listing tenants does not require a tenant in the URL', function () {
     $user = User::factory()->create();
     createTenantForUser($user);
 
@@ -114,7 +114,7 @@ test('guests cannot create a tenant', function () {
     ])->assertUnauthorized();
 });
 
-test('creating a tenant does not require the X-Tenant header', function () {
+test('creating a tenant does not require a tenant in the URL', function () {
     $user = User::factory()->create();
 
     Sanctum::actingAs($user);

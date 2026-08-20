@@ -13,7 +13,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class JournalLineController extends Controller
 {
-    public function index(): AnonymousResourceCollection
+    public function index(string $tenant): AnonymousResourceCollection
     {
         $this->authorize('viewAny', JournalLine::class);
 
@@ -22,7 +22,7 @@ class JournalLineController extends Controller
         );
     }
 
-    public function store(StoreJournalLineRequest $request): JsonResponse
+    public function store(string $tenant, StoreJournalLineRequest $request): JsonResponse
     {
         $journal = Journal::findOrFail($request->validated('journal_id'));
 
@@ -35,14 +35,14 @@ class JournalLineController extends Controller
             ->setStatusCode(201);
     }
 
-    public function show(JournalLine $journalLine): JournalLineResource
+    public function show(string $tenant, JournalLine $journalLine): JournalLineResource
     {
         $this->authorize('view', $journalLine);
 
         return new JournalLineResource($journalLine->load('account', 'journal'));
     }
 
-    public function update(UpdateJournalLineRequest $request, JournalLine $journalLine): JournalLineResource
+    public function update(string $tenant, UpdateJournalLineRequest $request, JournalLine $journalLine): JournalLineResource
     {
         $this->authorize('update', $journalLine);
 
@@ -51,7 +51,7 @@ class JournalLineController extends Controller
         return new JournalLineResource($journalLine->fresh('account', 'journal'));
     }
 
-    public function destroy(JournalLine $journalLine): JsonResponse
+    public function destroy(string $tenant, JournalLine $journalLine): JsonResponse
     {
         $this->authorize('delete', $journalLine);
 

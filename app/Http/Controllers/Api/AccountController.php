@@ -12,7 +12,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class AccountController extends Controller
 {
-    public function index(): AnonymousResourceCollection
+    public function index(string $tenant): AnonymousResourceCollection
     {
         $this->authorize('viewAny', Account::class);
 
@@ -27,7 +27,7 @@ class AccountController extends Controller
         return AccountResource::collection($accounts);
     }
 
-    public function store(StoreAccountRequest $request): JsonResponse
+    public function store(string $tenant, StoreAccountRequest $request): JsonResponse
     {
         $this->authorize('create', Account::class);
 
@@ -38,14 +38,14 @@ class AccountController extends Controller
             ->setStatusCode(201);
     }
 
-    public function show(Account $account): AccountResource
+    public function show(string $tenant, Account $account): AccountResource
     {
         $this->authorize('view', $account);
 
         return new AccountResource($account->load(['parent', 'children']));
     }
 
-    public function update(UpdateAccountRequest $request, Account $account): AccountResource
+    public function update(string $tenant, UpdateAccountRequest $request, Account $account): AccountResource
     {
         $this->authorize('update', $account);
 
@@ -54,7 +54,7 @@ class AccountController extends Controller
         return new AccountResource($account->fresh('parent'));
     }
 
-    public function destroy(Account $account): JsonResponse
+    public function destroy(string $tenant, Account $account): JsonResponse
     {
         $this->authorize('delete', $account);
 

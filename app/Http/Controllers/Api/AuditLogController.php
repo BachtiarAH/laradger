@@ -9,7 +9,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class AuditLogController extends Controller
 {
-    public function index(): AnonymousResourceCollection
+    public function index(string $tenant): AnonymousResourceCollection
     {
         $this->authorize('viewAny', AuditLog::class);
 
@@ -18,7 +18,7 @@ class AuditLogController extends Controller
         );
     }
 
-    public function show(AuditLog $auditLog): AuditLogResource
+    public function show(string $tenant, AuditLog $auditLog): AuditLogResource
     {
         $this->authorize('view', $auditLog);
 

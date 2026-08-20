@@ -13,7 +13,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class BudgetController extends Controller
 {
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(string $tenant, Request $request): AnonymousResourceCollection
     {
         $query = Budget::query()
             ->with(['accounts', 'tags']);
@@ -41,7 +41,7 @@ class BudgetController extends Controller
         return BudgetResource::collection($query->latest('starts_at')->paginate());
     }
 
-    public function store(StoreBudgetRequest $request): JsonResponse
+    public function store(string $tenant, StoreBudgetRequest $request): JsonResponse
     {
         $data = $request->validated();
         $accountIds = $data['account_ids'] ?? [];
@@ -58,14 +58,14 @@ class BudgetController extends Controller
         return (new BudgetResource($budget->load(['accounts', 'tags'])))->response()->setStatusCode(201);
     }
 
-    public function show(Request $request, Budget $budget): BudgetResource
+    public function show(string $tenant, Request $request, Budget $budget): BudgetResource
     {
         $this->ensureOwner($request, $budget);
 
         return new BudgetResource($budget->load(['accounts', 'tags']));
     }
 
-    public function update(UpdateBudgetRequest $request, Budget $budget): BudgetResource
+    public function update(string $tenant, UpdateBudgetRequest $request, Budget $budget): BudgetResource
     {
         $this->ensureOwner($request, $budget);
 
@@ -87,7 +87,7 @@ class BudgetController extends Controller
         return new BudgetResource($budget->fresh()->load(['accounts', 'tags']));
     }
 
-    public function destroy(Request $request, Budget $budget): JsonResponse
+    public function destroy(string $tenant, Request $request, Budget $budget): JsonResponse
     {
         $this->ensureOwner($request, $budget);
         $budget->delete();

@@ -6,25 +6,25 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreAiJournalDraftRequest;
 use App\Models\Account;
 use App\Services\Ai\Exceptions\AiProviderException;
-use App\Services\Ai\JournalDraftService;
+use App\Services\Ai\Tasks\JournalDraftTask;
 use Illuminate\Http\JsonResponse;
 
 class AiJournalDraftController extends Controller
 {
     public function __construct(
-        private readonly JournalDraftService $service,
+        private readonly JournalDraftTask $task,
     ) {}
 
-    public function store(StoreAiJournalDraftRequest $request): JsonResponse
+    public function store(string $tenant, StoreAiJournalDraftRequest $request): JsonResponse
     {
         $accounts = Account::query()
             ->select('name', 'type')
-            ->orderBy('name')
+            ->orderBy('name', 'asc')
             ->get()
             ->toArray();
 
         try {
-            $draft = $this->service->draftWithFallback(
+            $draft = $this->task->draft(
                 $request->validated('statement'),
                 $accounts,
             );

@@ -12,7 +12,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class JournalTagController extends Controller
 {
-    public function index(): AnonymousResourceCollection
+    public function index(string $tenant): AnonymousResourceCollection
     {
         $this->authorize('viewAny', JournalTag::class);
 
@@ -21,7 +21,7 @@ class JournalTagController extends Controller
         );
     }
 
-    public function store(StoreJournalTagRequest $request): JsonResponse
+    public function store(string $tenant, StoreJournalTagRequest $request): JsonResponse
     {
         $journal = Journal::findOrFail($request->validated('journal_id'));
 

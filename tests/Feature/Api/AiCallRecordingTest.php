@@ -13,7 +13,6 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->tenant = createTenantForUser($this->user);
     Sanctum::actingAs($this->user);
-    $this->withHeader('X-Tenant', $this->tenant->slug);
 
     config(['ai.default' => 'openai']);
     config(['ai.providers.openai.api_key' => 'test-key']);
@@ -70,7 +69,7 @@ test('records the ai call with prompt, draft, usage, and latency', function () {
         ])),
     ]);
 
-    $response = $this->postJson('/api/v1/journals/ai-draft', [
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $45.50 on groceries with cash',
     ]);
 
@@ -107,7 +106,7 @@ test('records the failed ai call with an error message', function () {
         'https://api.openai.com/*' => Http::response([], 500),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $10 on coffee',
     ])->assertStatus(502);
 
@@ -135,7 +134,7 @@ test('does not record when recording is disabled', function () {
         ])),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $45.50 on groceries with cash',
     ])->assertOk();
 
@@ -157,7 +156,7 @@ test('uses the custom system prompt when configured', function () {
         ])),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $10 on coffee',
     ])->assertOk();
 
@@ -185,14 +184,14 @@ test('records a confirmation when a journal is created with ai_record_id', funct
         ])),
     ]);
 
-    $recordId = $this->postJson('/api/v1/journals/ai-draft', [
+    $recordId = $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $45.50 on groceries with cash',
     ])->json('data.record_id');
 
     $cash = Account::where('name', 'Cash')->first();
     $groceries = Account::where('name', 'Groceries')->first();
 
-    $this->postJson('/api/v1/journals', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-17',
         'description' => 'Groceries purchase',
         'status' => 'draft',
@@ -246,7 +245,7 @@ test('the recording driver can be swapped via service injection', function () {
         ])),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $45.50 on groceries with cash',
     ])->assertOk();
 
@@ -275,7 +274,7 @@ test('uses the openai-compatible provider when configured as default', function 
         ])),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $10 on coffee',
     ])->assertOk()
         ->assertJsonPath('data.description', 'Coffee purchase');
@@ -308,7 +307,7 @@ test('uses a custom endpoint for the openai-compatible provider', function () {
         ])),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $10 on coffee',
     ])->assertOk()
         ->assertJsonPath('data.description', 'Coffee purchase');
@@ -327,7 +326,7 @@ test('records the raw response when the provider returns an error', function () 
         ], 401),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $10 on coffee',
     ])->assertStatus(502);
 
@@ -348,7 +347,7 @@ test('logs the error and raw response when the provider fails', function () {
         ], 401),
     ]);
 
-    $this->postJson('/api/v1/journals/ai-draft', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
         'statement' => 'Spent $10 on coffee',
     ])->assertStatus(502);
 

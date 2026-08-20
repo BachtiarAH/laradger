@@ -10,14 +10,13 @@ beforeEach(function () {
     $this->user = User::factory()->create();
     $this->tenant = createTenantForUser($this->user);
     Sanctum::actingAs($this->user);
-    $this->withHeader('X-Tenant', $this->tenant->slug);
 });
 
 test('journals can be listed and filtered by status', function () {
     Journal::factory()->count(2)->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
     Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
 
-    $this->getJson('/api/v1/journals?status=posted')
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals?status=posted")
         ->assertOk()
         ->assertJsonCount(2, 'data');
 });
@@ -26,7 +25,7 @@ test('a journal can be created with lines and tags', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
     $tag = Tag::factory()->create(['tenant_id' => $this->tenant->id]);
 
-    $response = $this->postJson('/api/v1/journals', [
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-01',
         'description' => 'Initial capital injection',
         'reference' => 'JRN-TEST-001',
@@ -46,7 +45,7 @@ test('a journal can be created with lines and tags', function () {
 });
 
 test('creating a journal validates nested lines', function () {
-    $this->postJson('/api/v1/journals', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-01',
         'description' => 'Missing lines',
         'reference' => 'JRN-TEST-002',
@@ -59,7 +58,7 @@ test('creating a journal validates nested lines', function () {
 test('a journal line can be created without a description', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
-    $this->postJson('/api/v1/journals', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-01',
         'description' => 'Line without description',
         'reference' => 'JRN-TEST-003',
@@ -77,7 +76,7 @@ test('a journal line can be created without a description', function () {
 test('a journal reference is auto-generated when omitted', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
-    $this->postJson('/api/v1/journals', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-01',
         'description' => 'Auto reference',
         'status' => 'draft',
@@ -89,7 +88,7 @@ test('a journal reference is auto-generated when omitted', function () {
     ])->assertCreated()
         ->assertJsonPath('data.reference', 'JRN-2026-0001');
 
-    $this->postJson('/api/v1/journals', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-02',
         'description' => 'Second journal',
         'status' => 'draft',
@@ -106,14 +105,14 @@ test('journals are isolated between tenants', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id]);
     $otherTenantJournal = Journal::factory()->create();
 
-    $this->getJson("/api/v1/journals/{$journal->id}")->assertOk();
-    $this->getJson("/api/v1/journals/{$otherTenantJournal->id}")->assertNotFound();
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertOk();
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals/{$otherTenantJournal->id}")->assertNotFound();
 });
 
 test('a draft journal can be updated', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
 
-    $this->putJson("/api/v1/journals/{$journal->id}", [
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}", [
         'transaction_date' => '2026-08-01',
         'description' => 'Updated description',
         'reference' => $journal->reference,
@@ -125,13 +124,13 @@ test('a draft journal can be updated', function () {
 test('a draft journal can be deleted', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
 
-    $this->deleteJson("/api/v1/journals/{$journal->id}")->assertNoContent();
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertNoContent();
 });
 
 test('a posted journal cannot be updated', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
 
-    $this->putJson("/api/v1/journals/{$journal->id}", [
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}", [
         'transaction_date' => '2026-08-01',
         'description' => 'Tampered',
         'reference' => $journal->reference,
@@ -143,7 +142,7 @@ test('a posted journal cannot be updated', function () {
 test('an archived journal cannot be updated or deleted', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'archived']);
 
-    $this->putJson("/api/v1/journals/{$journal->id}", [
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}", [
         'transaction_date' => '2026-08-01',
         'description' => 'Tampered',
         'reference' => $journal->reference,
@@ -151,20 +150,20 @@ test('an archived journal cannot be updated or deleted', function () {
         'source' => 'manual',
     ])->assertForbidden();
 
-    $this->deleteJson("/api/v1/journals/{$journal->id}")->assertForbidden();
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertForbidden();
 });
 
 test('a posted journal cannot be deleted', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
 
-    $this->deleteJson("/api/v1/journals/{$journal->id}")->assertForbidden();
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertForbidden();
 });
 
 test('a posted journal cannot receive new lines', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
-    $this->postJson('/api/v1/journal-lines', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journal-lines", [
         'journal_id' => $journal->id,
         'account_id' => $account->id,
         'debit' => 500.00,
@@ -177,7 +176,7 @@ test('a journal can be reversed with opposite lines', function () {
     $journal->lines()->create(['account_id' => $account->id, 'debit' => 1000.00, 'credit' => 0, 'description' => 'Dr']);
     $journal->lines()->create(['account_id' => $account->id, 'debit' => 0, 'credit' => 1000.00, 'description' => 'Cr']);
 
-    $response = $this->postJson("/api/v1/journals/{$journal->id}/reverse");
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}/reverse");
 
     $response->assertCreated()
         ->assertJsonPath('data.reverse_from_id', $journal->id)
@@ -200,5 +199,5 @@ test('a journal can be reversed with opposite lines', function () {
 test('a draft journal cannot be reversed', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
 
-    $this->postJson("/api/v1/journals/{$journal->id}/reverse")->assertForbidden();
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}/reverse")->assertForbidden();
 });

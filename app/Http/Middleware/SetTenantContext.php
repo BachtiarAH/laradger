@@ -7,13 +7,12 @@ use App\Tenancy\TenantContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class SetTenantContext
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $slug = $request->header('X-Tenant');
+        $slug = $request->route('tenant');
 
         if (blank($slug)) {
             return $next($request);
@@ -22,7 +21,7 @@ class SetTenantContext
         $tenant = Tenant::where('slug', $slug)->first();
 
         if (! $tenant) {
-            throw new NotFoundHttpException('Tenant not found.');
+            return $next($request);
         }
 
         TenantContext::set($tenant);

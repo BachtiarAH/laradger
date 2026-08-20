@@ -13,8 +13,7 @@ it('returns a clean 403 JSON response when a user is not a tenant member', funct
     $journal = Journal::factory()->create(['tenant_id' => $tenant->id]);
 
     $response = actingAs($other)
-        ->withHeader('X-Tenant', $tenant->slug)
-        ->getJson("/api/v1/journals/{$journal->id}");
+        ->getJson("/api/v1/{$tenant->slug}/journals/{$journal->id}");
 
     $response->assertStatus(403)
         ->assertJson(['message' => 'You are not a member of this tenant.'])
@@ -28,8 +27,7 @@ it('returns a clean 403 JSON response for an immutable journal', function () {
     $journal = Journal::factory()->create(['tenant_id' => $tenant->id, 'status' => 'posted']);
 
     $response = actingAs($user)
-        ->withHeader('X-Tenant', $tenant->slug)
-        ->putJson("/api/v1/journals/{$journal->id}", [
+        ->putJson("/api/v1/{$tenant->slug}/journals/{$journal->id}", [
             'transaction_date' => now()->toDateString(),
             'description' => 'Edited',
             'reference' => 'JRN-TEST',

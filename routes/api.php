@@ -44,7 +44,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/tenants', [TenantController::class, 'store']);
     });
 
-    Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
+    Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant'])->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
 
         Route::apiResource('accounts', AccountController::class);

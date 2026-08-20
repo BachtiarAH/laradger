@@ -58,7 +58,7 @@ class AuthController extends Controller
         ]);
     }
 
-    public function logout(): JsonResponse
+    public function logout(string $tenant): JsonResponse
     {
         $request = request();
 

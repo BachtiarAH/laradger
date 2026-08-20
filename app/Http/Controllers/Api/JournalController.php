@@ -18,7 +18,7 @@ class JournalController extends Controller
         private readonly AiCallRecorder $aiCallRecorder,
     ) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(string $tenant): AnonymousResourceCollection
     {
         $this->authorize('viewAny', Journal::class);
 
@@ -33,7 +33,7 @@ class JournalController extends Controller
         return JournalResource::collection($journals);
     }
 
-    public function store(StoreJournalRequest $request): JsonResponse
+    public function store(string $tenant, StoreJournalRequest $request): JsonResponse
     {
         $this->authorize('create', Journal::class);
 
@@ -54,14 +54,14 @@ class JournalController extends Controller
             ->setStatusCode(201);
     }
 
-    public function show(Journal $journal): JournalResource
+    public function show(string $tenant, Journal $journal): JournalResource
     {
         $this->authorize('view', $journal);
 
         return new JournalResource($journal->load('lines.account', 'tags'));
     }
 
-    public function update(UpdateJournalRequest $request, Journal $journal): JournalResource
+    public function update(string $tenant, UpdateJournalRequest $request, Journal $journal): JournalResource
     {
         $this->authorize('update', $journal);
 
@@ -81,7 +81,7 @@ class JournalController extends Controller
         return new JournalResource($journal->fresh('lines.account', 'tags'));
     }
 
-    public function destroy(Journal $journal): JsonResponse
+    public function destroy(string $tenant, Journal $journal): JsonResponse
     {
         $this->authorize('delete', $journal);
 
@@ -90,7 +90,7 @@ class JournalController extends Controller
         return response()->json(null, 204);
     }
 
-    public function reverse(Journal $journal): JsonResponse
+    public function reverse(string $tenant, Journal $journal): JsonResponse
     {
         $this->authorize('reverse', $journal);
 

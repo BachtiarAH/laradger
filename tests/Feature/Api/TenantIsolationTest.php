@@ -16,33 +16,32 @@ beforeEach(function () {
     $this->otherTenant = Tenant::factory()->create();
 
     Sanctum::actingAs($this->user);
-    $this->withHeader('X-Tenant', $this->tenant->slug);
 });
 
 test('accounts are isolated between tenants on list and show', function () {
     $own = Account::factory()->create(['tenant_id' => $this->tenant->id]);
     $other = Account::factory()->create(['tenant_id' => $this->otherTenant->id]);
 
-    $this->getJson('/api/v1/accounts')
+    $this->getJson("/api/v1/{$this->tenant->slug}/accounts")
         ->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.id', $own->id);
 
-    $this->getJson("/api/v1/accounts/{$own->id}")->assertOk();
-    $this->getJson("/api/v1/accounts/{$other->id}")->assertNotFound();
+    $this->getJson("/api/v1/{$this->tenant->slug}/accounts/{$own->id}")->assertOk();
+    $this->getJson("/api/v1/{$this->tenant->slug}/accounts/{$other->id}")->assertNotFound();
 });
 
 test('a user cannot update or delete another tenant account', function () {
     $other = Account::factory()->create(['tenant_id' => $this->otherTenant->id]);
 
-    $this->putJson("/api/v1/accounts/{$other->id}", [
+    $this->putJson("/api/v1/{$this->tenant->slug}/accounts/{$other->id}", [
         'name' => 'Tampered',
         'type' => 'asset',
         'currency' => 'IDR',
         'status' => 'active',
     ])->assertNotFound();
 
-    $this->deleteJson("/api/v1/accounts/{$other->id}")->assertNotFound();
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$other->id}")->assertNotFound();
 
     $this->assertDatabaseHas('accounts', ['id' => $other->id]);
 });
@@ -51,24 +50,24 @@ test('tags are isolated between tenants on list and show', function () {
     $own = Tag::factory()->create(['tenant_id' => $this->tenant->id]);
     $other = Tag::factory()->create(['tenant_id' => $this->otherTenant->id]);
 
-    $this->getJson('/api/v1/tags')
+    $this->getJson("/api/v1/{$this->tenant->slug}/tags")
         ->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.id', $own->id);
 
-    $this->getJson("/api/v1/tags/{$own->id}")->assertOk();
-    $this->getJson("/api/v1/tags/{$other->id}")->assertNotFound();
+    $this->getJson("/api/v1/{$this->tenant->slug}/tags/{$own->id}")->assertOk();
+    $this->getJson("/api/v1/{$this->tenant->slug}/tags/{$other->id}")->assertNotFound();
 });
 
 test('a user cannot update or delete another tenant tag', function () {
     $other = Tag::factory()->create(['tenant_id' => $this->otherTenant->id]);
 
-    $this->putJson("/api/v1/tags/{$other->id}", [
+    $this->putJson("/api/v1/{$this->tenant->slug}/tags/{$other->id}", [
         'name' => 'Tampered',
         'type' => 'priority',
     ])->assertNotFound();
 
-    $this->deleteJson("/api/v1/tags/{$other->id}")->assertNotFound();
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/tags/{$other->id}")->assertNotFound();
 
     $this->assertDatabaseHas('tags', ['id' => $other->id]);
 });
@@ -77,12 +76,12 @@ test('budgets are isolated between tenants', function () {
     $own = Budget::factory()->create(['tenant_id' => $this->tenant->id, 'user_id' => $this->user->id]);
     $other = Budget::factory()->create(['tenant_id' => $this->otherTenant->id]);
 
-    $this->getJson('/api/v1/budgets')
+    $this->getJson("/api/v1/{$this->tenant->slug}/budgets")
         ->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.id', $own->id);
 
-    $this->getJson("/api/v1/budgets/{$other->id}")->assertNotFound();
+    $this->getJson("/api/v1/{$this->tenant->slug}/budgets/{$other->id}")->assertNotFound();
 });
 
 test('audit logs are isolated between tenants', function () {
@@ -99,13 +98,13 @@ test('audit logs are isolated between tenants', function () {
         'journal_id' => $otherJournal->id,
     ]);
 
-    $this->getJson('/api/v1/audit-logs')
+    $this->getJson("/api/v1/{$this->tenant->slug}/audit-logs")
         ->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.id', $own->id);
 
-    $this->getJson("/api/v1/audit-logs/{$own->id}")->assertOk();
-    $this->getJson("/api/v1/audit-logs/{$other->id}")->assertNotFound();
+    $this->getJson("/api/v1/{$this->tenant->slug}/audit-logs/{$own->id}")->assertOk();
+    $this->getJson("/api/v1/{$this->tenant->slug}/audit-logs/{$other->id}")->assertNotFound();
 });
 
 test('journal lines are isolated between tenants', function () {
@@ -125,13 +124,13 @@ test('journal lines are isolated between tenants', function () {
         'credit' => 0,
     ]);
 
-    $this->getJson('/api/v1/journal-lines')
+    $this->getJson("/api/v1/{$this->tenant->slug}/journal-lines")
         ->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.id', $own->id);
 
-    $this->getJson("/api/v1/journal-lines/{$own->id}")->assertOk();
-    $this->getJson("/api/v1/journal-lines/{$other->id}")->assertNotFound();
+    $this->getJson("/api/v1/{$this->tenant->slug}/journal-lines/{$own->id}")->assertOk();
+    $this->getJson("/api/v1/{$this->tenant->slug}/journal-lines/{$other->id}")->assertNotFound();
 });
 
 test('journal tags are isolated between tenants', function () {
@@ -143,7 +142,7 @@ test('journal tags are isolated between tenants', function () {
     $otherTag = Tag::factory()->create(['tenant_id' => $this->otherTenant->id]);
     $other = JournalTag::create(['journal_id' => $otherJournal->id, 'tag_id' => $otherTag->id]);
 
-    $this->getJson('/api/v1/journal-tags')
+    $this->getJson("/api/v1/{$this->tenant->slug}/journal-tags")
         ->assertOk()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.journal_id', $own->journal_id)
@@ -154,7 +153,7 @@ test('a journal line cannot be attached to another tenant journal', function () 
     $otherJournal = Journal::factory()->create(['tenant_id' => $this->otherTenant->id]);
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
-    $this->postJson('/api/v1/journal-lines', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journal-lines", [
         'journal_id' => $otherJournal->id,
         'account_id' => $account->id,
         'debit' => 100.00,
@@ -165,7 +164,7 @@ test('a tag cannot be attached to another tenant journal', function () {
     $otherJournal = Journal::factory()->create(['tenant_id' => $this->otherTenant->id, 'status' => 'draft']);
     $tag = Tag::factory()->create(['tenant_id' => $this->tenant->id]);
 
-    $this->postJson('/api/v1/journal-tags', [
+    $this->postJson("/api/v1/{$this->tenant->slug}/journal-tags", [
         'journal_id' => $otherJournal->id,
         'tag_id' => $tag->id,
     ])->assertStatus(422)->assertJsonValidationErrors(['journal_id']);

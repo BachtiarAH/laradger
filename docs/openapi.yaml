@@ -10,17 +10,17 @@ info:
     Every user belongs to one or more **tenants** (organizations). Registration
     automatically creates a tenant and attaches the user as its `owner`.
 
-    All protected endpoints require the target tenant to be selected by sending
-    its slug in the `X-Tenant` header:
+    All protected endpoints are scoped by including the tenant's slug in the
+    URL path:
 
     ```
-    X-Tenant: my-company
+    /api/v1/my-company/accounts
     ```
 
-    Responses are scoped to the selected tenant only:
-    - A missing `X-Tenant` header returns `422` with an `errors.tenant` message.
-    - An unknown slug returns `404`.
+    Responses are scoped to the tenant in the URL only:
+    - An unknown tenant slug returns `404`.
     - A slug for a tenant you are not a member of returns `403`.
+    - An invalid or missing token returns `401`.
 
     ## Authentication
 
@@ -48,7 +48,7 @@ info:
     updated, deleted, or receive new lines/tags — any attempt returns `403`.
 
     To correct or cancel a posted journal, create a **reversal** via
-    `POST /api/v1/journals/{journal}/reverse`. This posts a new journal whose
+    `POST /api/v1/{tenant}/journals/{journal}/reverse`. This posts a new journal whose
     debit and credit lines are the inverse of the original, sets
     `reverse_from_id` to the original journal's id, copies its tags, and marks
     it `source: system`.
@@ -233,9 +233,9 @@ paths:
       tags: [Tenants]
       summary: List the tenants the authenticated user belongs to
       description: |
-        Returns the user's tenants before an `X-Tenant` header is selected, so
-        this endpoint does **not** require the header. Each tenant includes the
-        user's `role` within it.
+        Returns the tenants the authenticated user belongs to. This endpoint
+        does **not** require a tenant in the URL because it is not scoped to a
+        selected tenant. Each tenant includes the user's `role` within it.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
@@ -260,8 +260,8 @@ paths:
       summary: Create a tenant for the authenticated user
       description: |
         Creates a new tenant (accounting book) and attaches the authenticated
-        user as its `owner`. This endpoint does **not** require the `X-Tenant`
-        header because it is not scoped to a selected tenant.
+        user as its `owner`. This endpoint does **not** require a tenant in the
+        URL because it is not scoped to a selected tenant.
 
         If `slug` is omitted it is auto-generated from the name plus a short
         random suffix (mirroring registration).
@@ -297,12 +297,12 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /logout:
+  /{tenant}/logout:
     post:
       tags: [Auth]
       summary: Invalidate the current token
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       responses:
         '200':
           description: Logged out
@@ -316,13 +316,13 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /accounts:
+  /{tenant}/accounts:
     get:
       tags: [Accounts]
       summary: List accounts
       description: Filter by type, currency, status, and search by name.
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
         - name: type
@@ -364,7 +364,7 @@ paths:
       tags: [Accounts]
       summary: Create an account
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -385,9 +385,9 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /accounts/{account}:
+  /{tenant}/accounts/{account}:
     parameters:
-      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/Tenant'
       - $ref: '#/components/parameters/AccountId'
     get:
       tags: [Accounts]
@@ -440,13 +440,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /budgets:
+  /{tenant}/budgets:
     get:
       tags: [Budgets]
       summary: List budgets
       description: Filter by search, date range, tag, and account.
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
         - name: search
@@ -498,7 +498,7 @@ paths:
       tags: [Budgets]
       summary: Create a budget
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -519,9 +519,9 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /budgets/{budget}:
+  /{tenant}/budgets/{budget}:
     parameters:
-      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/Tenant'
       - $ref: '#/components/parameters/BudgetId'
     get:
       tags: [Budgets]
@@ -576,13 +576,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /journals:
+  /{tenant}/journals:
     get:
       tags: [Journals]
       summary: List journals
       description: Filter by status, source, and transaction date range.
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
         - name: status
@@ -627,7 +627,7 @@ paths:
       tags: [Journals]
       summary: Create a journal with lines and tags
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -648,7 +648,7 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /journals/ai-draft:
+  /{tenant}/journals/ai-draft:
     post:
       tags: [Journals]
       summary: Generate a draft journal from a natural-language statement
@@ -669,7 +669,7 @@ paths:
         Every call (prompt, response, token usage, latency) is recorded to
         `storage/logs/ai-calls.jsonl` unless recording is disabled.
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -713,9 +713,9 @@ paths:
                       type: array
                       items:
                         type: string
-  /journals/{journal}:
+  /{tenant}/journals/{journal}:
     parameters:
-      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/Tenant'
       - $ref: '#/components/parameters/JournalId'
     get:
       tags: [Journals]
@@ -801,12 +801,12 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /journal-lines:
+  /{tenant}/journal-lines:
     get:
       tags: [Journal Lines]
       summary: List journal lines
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -830,7 +830,7 @@ paths:
       summary: Create a journal line
       description: Exactly one of `debit` or `credit` must be provided and positive. Lines can only be added to a journal with status `draft`.
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -851,9 +851,9 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /journal-lines/{journal_line}:
+  /{tenant}/journal-lines/{journal_line}:
     parameters:
-      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/Tenant'
       - $ref: '#/components/parameters/JournalLineId'
     get:
       tags: [Journal Lines]
@@ -908,12 +908,12 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /journal-tags:
+  /{tenant}/journal-tags:
     get:
       tags: [Journal Tags]
       summary: List journal-tag relations
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -937,7 +937,7 @@ paths:
       summary: Attach a tag to a journal
       description: Tags can only be attached to a journal with status `draft`.
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -967,12 +967,12 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /tags:
+  /{tenant}/tags:
     get:
       tags: [Tags]
       summary: List tags
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -995,7 +995,7 @@ paths:
       tags: [Tags]
       summary: Create a tag
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
       requestBody:
         required: true
         content:
@@ -1024,9 +1024,9 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /tags/{tag}:
+  /{tenant}/tags/{tag}:
     parameters:
-      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/Tenant'
       - $ref: '#/components/parameters/TagId'
     get:
       tags: [Tags]
@@ -1087,12 +1087,12 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /audit-logs:
+  /{tenant}/audit-logs:
     get:
       tags: [Audit Logs]
       summary: List audit logs
       parameters:
-        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Tenant'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
@@ -1111,9 +1111,9 @@ paths:
                           $ref: '#/components/schemas/AuditLog'
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /audit-logs/{audit_log}:
+  /{tenant}/audit-logs/{audit_log}:
     parameters:
-      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/Tenant'
       - $ref: '#/components/parameters/AuditLogId'
     get:
       tags: [Audit Logs]
@@ -1143,9 +1143,9 @@ components:
       bearerFormat: JWT
 
   parameters:
-    TenantId:
-      name: X-Tenant
-      in: header
+    Tenant:
+      name: tenant
+      in: path
       required: true
       description: Slug of the tenant to scope the request to
       schema:
@@ -1341,7 +1341,7 @@ components:
           type: string
         slug:
           type: string
-          description: Value sent in the X-Tenant header
+          description: The tenant's slug, used in the URL path
         role:
           type: string
           enum: [owner, member]
