@@ -2,34 +2,33 @@
 
 namespace App\Services\Ai\Providers;
 
-use App\Services\Ai\AbstractJournalDraftProvider;
 use App\Services\Ai\Exceptions\AiProviderException;
-use App\Services\Ai\JournalDraft;
 use Illuminate\Http\Client\Response;
 
-class OpenAiJournalDraftProvider extends AbstractJournalDraftProvider
+class OpenAiCompatibleProvider extends AbstractAiProvider
 {
     public static function name(): string
     {
-        return 'openai';
+        return 'openai_compatible';
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $accounts
+     * @param  array<int, array{role: string, content: string}>  $messages
+     * @param  array<string, mixed>  $options
      * @return array<string, mixed>
      */
-    protected function requestPayload(string $statement, array $accounts): array
+    protected function requestPayload(array $messages, array $options = []): array
     {
-        return [
+        $payload = [
             'model' => $this->config['model'] ?? 'gpt-4o-mini',
-            'messages' => [
-                [
-                    'role' => 'system',
-                    'content' => $this->buildPrompt($statement, $accounts),
-                ],
-            ],
-            'response_format' => ['type' => 'json_object'],
+            'messages' => $messages,
         ];
+
+        if (($options['structured'] ?? false) === true) {
+            $payload['response_format'] = ['type' => 'json_object'];
+        }
+
+        return $payload;
     }
 
     /**
@@ -44,18 +43,21 @@ class OpenAiJournalDraftProvider extends AbstractJournalDraftProvider
 
     protected function endpoint(): string
     {
-        return '/v1/chat/completions';
+        return $this->config['endpoint'] ?? '/v1/chat/completions';
     }
 
-    protected function extractDraft(Response $response): JournalDraft
+    protected function extractContent(Response $response): string
     {
         $content = $response->json('choices.0.message.content');
 
         if (! is_string($content) || blank($content)) {
-            throw AiProviderException::invalidResponse('The AI provider returned an empty response.');
+            throw AiProviderException::invalidResponse(
+                'The AI provider returned an empty response.',
+                rawResponse: $response->json() ?? [],
+            );
         }
 
-        return $this->parseDraft($content);
+        return $content;
     }
 
     /**

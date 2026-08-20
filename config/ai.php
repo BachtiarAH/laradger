@@ -20,10 +20,10 @@ return [
     | AI Providers
     |--------------------------------------------------------------------------
     |
-    | Each provider is an HTTP-backed driver resolved through Laravel's Http
-    | client. Add a new provider by implementing the
-    | App\Services\Ai\Contracts\JournalDraftProvider contract and registering
-    | it here.
+    | Each provider is an HTTP-backed driver resolved through the AI gateway
+    | (App\Services\Ai\Gateway\AiGateway). Add a new provider by implementing
+    | App\Services\Ai\Providers\Contracts\AiProvider and registering it in the
+    | gateway's PROVIDERS map.
     |
     */
 

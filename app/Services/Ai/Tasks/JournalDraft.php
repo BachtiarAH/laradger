@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\Ai;
+namespace App\Services\Ai\Tasks;
 
 use Illuminate\Contracts\Support\Arrayable;
 

@@ -2,12 +2,10 @@
 
 namespace App\Services\Ai\Providers;
 
-use App\Services\Ai\AbstractJournalDraftProvider;
 use App\Services\Ai\Exceptions\AiProviderException;
-use App\Services\Ai\JournalDraft;
 use Illuminate\Http\Client\Response;
 
-class AnthropicJournalDraftProvider extends AbstractJournalDraftProvider
+class AnthropicProvider extends AbstractAiProvider
 {
     public static function name(): string
     {
@@ -15,22 +13,31 @@ class AnthropicJournalDraftProvider extends AbstractJournalDraftProvider
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $accounts
+     * @param  array<int, array{role: string, content: string}>  $messages
+     * @param  array<string, mixed>  $options
      * @return array<string, mixed>
      */
-    protected function requestPayload(string $statement, array $accounts): array
+    protected function requestPayload(array $messages, array $options = []): array
     {
-        return [
+        $system = collect($messages)
+            ->where('role', 'system')
+            ->pluck('content')
+            ->implode("\n\n");
+
+        $payload = [
             'model' => $this->config['model'] ?? 'claude-3-5-haiku-20241022',
             'max_tokens' => 1024,
-            'system' => $this->buildPrompt($statement, $accounts),
-            'messages' => [
-                [
-                    'role' => 'user',
-                    'content' => $statement,
-                ],
-            ],
+            'messages' => collect($messages)
+                ->reject(fn (array $message): bool => $message['role'] === 'system')
+                ->values()
+                ->all(),
         ];
+
+        if (filled($system)) {
+            $payload['system'] = $system;
+        }
+
+        return $payload;
     }
 
     /**
@@ -49,15 +56,18 @@ class AnthropicJournalDraftProvider extends AbstractJournalDraftProvider
         return '/v1/messages';
     }
 
-    protected function extractDraft(Response $response): JournalDraft
+    protected function extractContent(Response $response): string
     {
         $content = $response->json('content.0.text');
 
         if (! is_string($content) || blank($content)) {
-            throw AiProviderException::invalidResponse('The AI provider returned an empty response.');
+            throw AiProviderException::invalidResponse(
+                'The AI provider returned an empty response.',
+                rawResponse: $response->json() ?? [],
+            );
         }
 
-        return $this->parseDraft($content);
+        return $content;
     }
 
     /**

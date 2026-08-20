@@ -3,31 +3,52 @@ paths:
   - 'app/Services/Ai/**'
 ---
 
-# AI Journal Draft Service
+# AI Service Architecture
 
-The AI draft feature is provider-agnostic. Providers are HTTP-backed drivers
-resolved through `JournalDraftService` (a Laravel Manager) using the configured
-driver name in `config/ai.php`. Swap providers by changing `AI_DEFAULT_PROVIDER`
-— no code changes required.
+The AI feature is layered so tasks and providers are independently composable:
 
-- Every provider implements `Contracts\JournalDraftProvider` and extends
-  `AbstractJournalDraftProvider` (which handles the HTTP call, shared prompt,
-  error mapping, and call recording). Register new drivers in
-  `JournalDraftService::PROVIDERS` and add a matching `createXxxDriver()` method.
-- Providers never persist data — they only return a `JournalDraft` value object
-  for review. Confirmation is done via the normal journal endpoints.
-- Responses are validated before use; missing/duplicated debit/credit lines or
-  non-numeric amounts throw `AiProviderException::invalidResponse`.
-- Use `draftWithFallback()` when a fallback provider is configured
-  (`isConfigured()`), otherwise the configured provider error is rethrown.
+```text
+AI Tasks → AI Gateway → Provider Adapters → AI APIs
+```
+
+Adding a new AI task never requires a new provider implementation, and adding a
+new provider never requires touching existing tasks.
+
+## Layers
+
+- **Tasks** (`Tasks/`) own task-specific behavior: prompt construction, response
+  parsing, and value objects. `JournalDraftTask` implements the `AiTask`
+  contract (`statement`, `prompt`, `messages`, `options`, `interpret`) and is
+  resolved via the container. It calls `AiGateway::run($this, $context)`.
+- **Gateway** (`Gateway/AiGateway.php`, a Laravel Manager) owns generic AI
+  orchestration: provider selection, fallback chaining across configured
+  providers, call recording (`AiCallRecord` via `AiCallRecorder`), logging, and
+  latency tracking. Providers register in `AiGateway::PROVIDERS` with a matching
+  `createXxxDriver()` method.
+- **Provider Adapters** (`Providers/`) own only provider transport. Each
+  implements `Providers\Contracts\AiProvider` (`name`, `isConfigured`, `chat`)
+  and extends `AbstractAiProvider` (HTTP call, error mapping, logging). They are
+  task-agnostic: no prompt or parsing logic lives here.
+
+## Behavior to preserve
+
+- Tasks never persist data — they return a value object for review; confirmation
+  is done via the normal journal endpoints (`AiCallRecorder::confirm`).
+- Responses are validated by the task before use; invalid drafts throw
+  `AiProviderException::invalidResponse`.
+- The gateway runs the default provider first, then falls back through the other
+  configured providers; each attempt is recorded and logged independently.
+  If none succeed, the last `AiProviderException` is rethrown.
 - The controller maps provider failures to a `502` with an `errors.statement`
   message; never leak raw provider responses.
+- `interpret(string $content, string $recordId)` parses the provider content and
+  attaches the record id to the returned value object.
 
 ## Prompt customization
 
 The system prompt is configurable via `config('ai.prompt')` / `AI_PROMPT`. When
-set, placeholders `:accounts` and `:statement` are replaced at call time. When
-empty, the built-in default prompt (in `AbstractJournalDraftProvider`) is used.
+set, placeholders `:accounts` and `:statement` are replaced at call time by
+`JournalDraftTask`. When empty, the built-in default prompt is used.
 
 ## Call recording (prompt + response + usage + confirmation)
 
