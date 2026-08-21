@@ -9,7 +9,7 @@ on:
       deploy:
         description: 'Deploy to server after tests pass'
         required: false
-        default: 'false'
+        default: false
         type: boolean
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: '8.5'
           extensions: mbstring, intl, bcmath, sqlite3, pdo_sqlite, dom, curl, zip
           coverage: none
 
