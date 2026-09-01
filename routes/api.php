@@ -36,17 +36,16 @@ Route::get('/docs', function () {
 });
 
 Route::prefix('v1')->group(function () {
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:register');
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/tenants', [TenantController::class, 'index']);
         Route::post('/tenants', [TenantController::class, 'store']);
+        Route::post('/logout', [AuthController::class, 'logout']);
     });
 
     Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant'])->group(function () {
-        Route::post('/logout', [AuthController::class, 'logout']);
-
         Route::apiResource('accounts', AccountController::class);
         Route::apiResource('journals', JournalController::class);
         Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);

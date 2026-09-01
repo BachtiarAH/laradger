@@ -8,9 +8,13 @@ use App\Http\Requests\UpdateJournalRequest;
 use App\Http\Resources\JournalResource;
 use App\Models\Journal;
 use App\Services\Ai\Contracts\AiCallRecorder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
+use Throwable;
 
 class JournalController extends Controller
 {
@@ -37,17 +41,26 @@ class JournalController extends Controller
     {
         $this->authorize('create', Journal::class);
 
-        $journal = Journal::create($request->safe()->except(['lines', 'tags', 'ai_record_id']));
+        $journal = retry(
+            times: 3,
+            callback: fn () => DB::transaction(function () use ($request) {
+                $journal = Journal::create($request->safe()->except(['lines', 'tags', 'ai_record_id']));
 
-        foreach ($request->validated('lines', []) as $line) {
-            $journal->lines()->create($line);
-        }
+                foreach ($request->validated('lines', []) as $line) {
+                    $journal->lines()->create($line);
+                }
 
-        $journal->tags()->sync($request->validated('tags', []));
+                $journal->tags()->sync($request->validated('tags', []));
 
-        if ($recordId = $request->validated('ai_record_id')) {
-            $this->aiCallRecorder->confirm($recordId, $journal);
-        }
+                if ($recordId = $request->validated('ai_record_id')) {
+                    $this->aiCallRecorder->confirm($recordId, $journal);
+                }
+
+                return $journal;
+            }),
+            sleepMilliseconds: 50,
+            when: fn (Throwable $e) => $e instanceof UniqueConstraintViolationException,
+        );
 
         return (new JournalResource($journal->load('lines.account', 'tags')))
             ->response()
@@ -65,18 +78,20 @@ class JournalController extends Controller
     {
         $this->authorize('update', $journal);
 
-        $journal->update($request->safe()->except(['lines', 'tags']));
+        DB::transaction(function () use ($request, $journal) {
+            $journal->update($request->safe()->except(['lines', 'tags']));
 
-        if ($request->has('lines')) {
-            $journal->lines()->delete();
-            foreach ($request->validated('lines', []) as $line) {
-                $journal->lines()->create($line);
+            if ($request->has('lines')) {
+                $journal->lines()->delete();
+                foreach ($request->validated('lines', []) as $line) {
+                    $journal->lines()->create($line);
+                }
             }
-        }
 
-        if ($request->has('tags')) {
-            $journal->tags()->sync($request->validated('tags', []));
-        }
+            if ($request->has('tags')) {
+                $journal->tags()->sync($request->validated('tags', []));
+            }
+        });
 
         return new JournalResource($journal->fresh('lines.account', 'tags'));
     }
@@ -84,6 +99,18 @@ class JournalController extends Controller
     public function destroy(string $tenant, Journal $journal): JsonResponse
     {
         $this->authorize('delete', $journal);
+
+        if ($journal->lines()->exists()) {
+            throw new ConflictHttpException('The journal cannot be deleted because it has journal lines.');
+        }
+
+        if ($journal->auditLogs()->exists()) {
+            throw new ConflictHttpException('The journal cannot be deleted because it has audit logs.');
+        }
+
+        if ($journal->reversals()->exists()) {
+            throw new ConflictHttpException('The journal cannot be deleted because it has reversals.');
+        }
 
         $journal->delete();
 
@@ -94,25 +121,38 @@ class JournalController extends Controller
     {
         $this->authorize('reverse', $journal);
 
-        $reversal = Journal::create([
-            'transaction_date' => now(),
-            'description' => "Reversal of {$journal->reference}",
-            'reference' => 'REV-'.$journal->reference.'-'.Str::upper(Str::random(6)),
-            'status' => 'posted',
-            'source' => 'system',
-            'reverse_from_id' => $journal->id,
-        ]);
+        $reversal = retry(
+            times: 3,
+            callback: fn () => DB::transaction(function () use ($journal) {
+                if ($journal->reversals()->exists()) {
+                    throw new ConflictHttpException('The journal has already been reversed.');
+                }
 
-        foreach ($journal->lines as $line) {
-            $reversal->lines()->create([
-                'account_id' => $line->account_id,
-                'debit' => $line->credit,
-                'credit' => $line->debit,
-                'description' => "Reversal of: {$line->description}",
-            ]);
-        }
+                $reversal = Journal::create([
+                    'transaction_date' => now(),
+                    'description' => "Reversal of {$journal->reference}",
+                    'reference' => 'REV-'.$journal->reference.'-'.Str::upper(Str::random(6)),
+                    'status' => 'posted',
+                    'source' => 'system',
+                    'reverse_from_id' => $journal->id,
+                ]);
 
-        $reversal->tags()->sync($journal->tags->pluck('id'));
+                foreach ($journal->lines as $line) {
+                    $reversal->lines()->create([
+                        'account_id' => $line->account_id,
+                        'debit' => $line->credit,
+                        'credit' => $line->debit,
+                        'description' => "Reversal of: {$line->description}",
+                    ]);
+                }
+
+                $reversal->tags()->sync($journal->tags->pluck('id'));
+
+                return $reversal;
+            }),
+            sleepMilliseconds: 50,
+            when: fn (Throwable $e) => $e instanceof UniqueConstraintViolationException,
+        );
 
         return (new JournalResource($reversal->load('lines.account', 'tags')))
             ->response()

@@ -161,6 +161,20 @@ class JournalDraftTask implements AiTask
             ];
         }
 
+        $totalDebitCents = (int) round(array_sum(array_map(
+            fn (array $line) => (float) $line['debit'] * 100,
+            array_filter($normalized, fn (array $line) => $line['debit'] !== null),
+        )));
+
+        $totalCreditCents = (int) round(array_sum(array_map(
+            fn (array $line) => (float) $line['credit'] * 100,
+            array_filter($normalized, fn (array $line) => $line['credit'] !== null),
+        )));
+
+        if ($totalDebitCents !== $totalCreditCents) {
+            throw AiProviderException::invalidResponse('The AI provider returned an unbalanced draft: total debits must equal total credits.');
+        }
+
         return new JournalDraft(
             transaction_date: isset($data['transaction_date']) ? (string) $data['transaction_date'] : null,
             description: isset($data['description']) ? (string) $data['description'] : null,

@@ -66,4 +66,10 @@ class Account extends Model
     {
         return $this->hasMany(JournalLine::class);
     }
+
+    public function budgets()
+    {
+        return $this->belongsToMany(Budget::class, 'budget_accounts', 'account_id', 'budget_id')
+            ->withTimestamps();
+    }
 }

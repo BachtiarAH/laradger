@@ -10,6 +10,7 @@ use App\Models\Budget;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 
 class BudgetController extends Controller
 {
@@ -48,12 +49,16 @@ class BudgetController extends Controller
         $tagIds = $data['tag_ids'] ?? [];
         unset($data['account_ids'], $data['tag_ids']);
 
-        $budget = Budget::create([
-            ...$data,
-            'user_id' => $request->user()->id,
-        ]);
-        $budget->accounts()->sync($accountIds);
-        $budget->tags()->sync($tagIds);
+        $budget = DB::transaction(function () use ($request, $data, $accountIds, $tagIds) {
+            $budget = Budget::create([
+                ...$data,
+                'user_id' => $request->user()->id,
+            ]);
+            $budget->accounts()->sync($accountIds);
+            $budget->tags()->sync($tagIds);
+
+            return $budget;
+        });
 
         return (new BudgetResource($budget->load(['accounts', 'tags'])))->response()->setStatusCode(201);
     }
@@ -74,15 +79,17 @@ class BudgetController extends Controller
         $tagIds = array_key_exists('tag_ids', $data) ? $data['tag_ids'] : null;
         unset($data['account_ids'], $data['tag_ids']);
 
-        $budget->update($data);
+        DB::transaction(function () use ($budget, $data, $accountIds, $tagIds) {
+            $budget->update($data);
 
-        if ($accountIds !== null) {
-            $budget->accounts()->sync($accountIds);
-        }
+            if ($accountIds !== null) {
+                $budget->accounts()->sync($accountIds);
+            }
 
-        if ($tagIds !== null) {
-            $budget->tags()->sync($tagIds);
-        }
+            if ($tagIds !== null) {
+                $budget->tags()->sync($tagIds);
+            }
+        });
 
         return new BudgetResource($budget->fresh()->load(['accounts', 'tags']));
     }

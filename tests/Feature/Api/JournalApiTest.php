@@ -4,7 +4,11 @@ use App\Models\Account;
 use App\Models\Journal;
 use App\Models\Tag;
 use App\Models\User;
+use App\Services\Ai\Contracts\AiCallRecorder;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Mockery;
+use RuntimeException;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -127,6 +131,17 @@ test('a draft journal can be deleted', function () {
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertNoContent();
 });
 
+test('a draft journal with lines cannot be deleted and returns a conflict', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
+
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")
+        ->assertStatus(409);
+
+    expect(Journal::query()->find($journal->id))->not->toBeNull();
+});
+
 test('a posted journal cannot be updated', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
 
@@ -200,4 +215,146 @@ test('a draft journal cannot be reversed', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
 
     $this->postJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}/reverse")->assertForbidden();
+});
+
+test('a journal cannot be reversed twice', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 1000.00, 'credit' => 0]);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 0, 'credit' => 1000.00]);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}/reverse")->assertCreated();
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}/reverse")
+        ->assertStatus(409);
+
+    expect($journal->reversals()->count())->toBe(1);
+});
+
+test('clients cannot set reverse_from_id or a system source', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Forged system entry',
+        'status' => 'posted',
+        'source' => 'system',
+        'reverse_from_id' => Journal::factory()->create(['tenant_id' => $this->tenant->id])->id,
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 100.00],
+            ['account_id' => $account->id, 'credit' => 100.00],
+        ],
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['source']);
+});
+
+test('reverse_from_id is ignored when creating a journal', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $original = Journal::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Ignored reversal link',
+        'status' => 'draft',
+        'source' => 'manual',
+        'reverse_from_id' => $original->id,
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 100.00],
+            ['account_id' => $account->id, 'credit' => 100.00],
+        ],
+    ])->assertCreated()
+        ->assertJsonPath('data.reverse_from_id', null);
+
+    expect(Journal::query()->find($response->json('data.id'))->reverse_from_id)->toBeNull();
+});
+
+test('a duplicate reference is rejected', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Duplicate reference',
+        'reference' => $journal->reference,
+        'status' => 'draft',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 100.00],
+            ['account_id' => $account->id, 'credit' => 100.00],
+        ],
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['reference']);
+});
+
+test('an unbalanced journal cannot be created', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Unbalanced journal',
+        'status' => 'posted',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 1000.00],
+            ['account_id' => $account->id, 'credit' => 900.00],
+        ],
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['lines']);
+
+    expect(Journal::query()->where('description', 'Unbalanced journal')->exists())->toBeFalse();
+});
+
+test('an unbalanced journal cannot be updated', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
+
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Updated unbalanced',
+        'reference' => $journal->reference,
+        'status' => 'draft',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 500.00],
+            ['account_id' => $account->id, 'credit' => 100.00],
+        ],
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['lines']);
+});
+
+test('a balanced journal with fractional amounts can be created', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Fractional balanced journal',
+        'status' => 'posted',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 0.1],
+            ['account_id' => $account->id, 'debit' => 0.2],
+            ['account_id' => $account->id, 'credit' => 0.3],
+        ],
+    ])->assertCreated();
+});
+
+test('journal creation is rolled back when ai confirmation fails', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $recorder = Mockery::mock(AiCallRecorder::class);
+    $recorder->shouldReceive('confirm')->andThrow(new RuntimeException('recording failed'));
+    $this->instance(AiCallRecorder::class, $recorder);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Rolled back journal',
+        'status' => 'posted',
+        'source' => 'manual',
+        'ai_record_id' => Str::uuid()->toString(),
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 100.00],
+            ['account_id' => $account->id, 'credit' => 100.00],
+        ],
+    ])->assertStatus(500);
+
+    expect(Journal::query()->where('description', 'Rolled back journal')->exists())->toBeFalse();
 });

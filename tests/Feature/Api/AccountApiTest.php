@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Account;
+use App\Models\Journal;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
 
@@ -135,4 +136,15 @@ test('an account can be deleted', function () {
     $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")->assertNoContent();
 
     $this->assertDatabaseMissing('accounts', ['id' => $account->id]);
+});
+
+test('an account with journal lines cannot be deleted and returns a conflict', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
+
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")
+        ->assertStatus(409);
+
+    expect(Account::query()->find($account->id))->not->toBeNull();
 });

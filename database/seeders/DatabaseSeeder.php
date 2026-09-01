@@ -28,6 +28,15 @@ class DatabaseSeeder extends Seeder
                 fn (Tenant $tenant) => $tenant->users()->attach($user, ['role' => 'owner']),
             );
 
+        $bachtiar = User::firstOrCreate(
+            ['email' => 'bachtiarah73@gmail.com'],
+            ['name' => 'Bachtiar', 'password' => 'Password123'],
+        );
+
+        if (! $bachtiar->belongsToTenant($tenant)) {
+            $tenant->users()->attach($bachtiar, ['role' => 'owner']);
+        }
+
         TenantContext::set($tenant);
 
         try {

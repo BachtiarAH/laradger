@@ -7,4 +7,5 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Services/Ai/** | .ai/rules/ai.md |
 | app/Http/Middleware/** | .ai/rules/middleware.md |
 | database/migrations/** | .ai/rules/migrations.md |
+| database/** (and destructive artisan db commands) | .ai/rules/database.md |
 | app/Models/** | .ai/rules/models.md |

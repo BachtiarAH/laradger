@@ -101,10 +101,77 @@ test('login fails with invalid credentials', function () {
     ])->assertStatus(422);
 });
 
-test('a user can log out', function () {
+test('a user can log out and the token is invalidated', function () {
     $user = User::factory()->create();
-    $tenant = createTenantForUser($user);
+
+    $token = $user->createToken('api-token');
+
+    $this->withToken($token->plainTextToken)
+        ->postJson('/api/v1/logout')
+        ->assertOk()
+        ->assertJson(['message' => 'Logged out successfully.']);
+
+    expect($user->tokens()->count())->toBe(0);
+});
+
+test('logout requires authentication', function () {
+    $this->postJson('/api/v1/logout')->assertUnauthorized();
+});
+
+test('the tenant-scoped logout route no longer exists', function () {
+    $user = User::factory()->create();
     Sanctum::actingAs($user);
 
-    $this->postJson("/api/v1/{$tenant->slug}/logout")->assertOk();
+    $this->postJson('/api/v1/acme/logout')->assertNotFound();
+});
+
+test('login is throttled after too many attempts', function () {
+    $user = User::factory()->create(['password' => bcrypt('password')]);
+
+    foreach (range(1, 5) as $attempt) {
+        $this->postJson('/api/v1/login', [
+            'email' => $user->email,
+            'password' => 'wrong-password',
+        ])->assertStatus(422);
+    }
+
+    $this->postJson('/api/v1/login', [
+        'email' => $user->email,
+        'password' => 'password',
+    ])->assertStatus(429);
+});
+
+test('login throttling is keyed per email so other accounts are unaffected', function () {
+    $blocked = User::factory()->create(['password' => bcrypt('password')]);
+    $other = User::factory()->create(['password' => bcrypt('password')]);
+
+    foreach (range(1, 5) as $attempt) {
+        $this->postJson('/api/v1/login', [
+            'email' => $blocked->email,
+            'password' => 'wrong-password',
+        ])->assertStatus(422);
+    }
+
+    $this->postJson('/api/v1/login', [
+        'email' => $other->email,
+        'password' => 'password',
+    ])->assertOk();
+});
+
+test('registration is throttled after too many attempts from the same ip', function () {
+    foreach (range(1, 5) as $attempt) {
+        $this->postJson('/api/v1/register', [
+            'name' => "User {$attempt}",
+            'email' => "user{$attempt}@example.com",
+            'password' => 'password',
+            'password_confirmation' => 'password',
+        ])->assertCreated();
+    }
+
+    $this->postJson('/api/v1/register', [
+        'name' => 'User 6',
+        'email' => 'user6@example.com',
+        'password' => 'password',
+        'password_confirmation' => 'password',
+    ])->assertStatus(429);
 });

@@ -110,6 +110,33 @@ describe('ai draft generation', function () {
             ->assertJsonValidationErrors(['statement']);
     });
 
+    test('returns 502 when the provider returns an unbalanced draft', function () {
+        Http::fake([
+            'https://api.openai.com/*' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'draft' => [
+                                    'description' => 'Unbalanced',
+                                    'lines' => [
+                                        ['account_name' => 'Coffee', 'account_type' => 'expense', 'debit' => '10.00', 'credit' => null],
+                                        ['account_name' => 'Cash', 'account_type' => 'asset', 'debit' => null, 'credit' => '5.00'],
+                                    ],
+                                ],
+                            ]),
+                        ],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
+            'statement' => 'Spent $10 on coffee',
+        ])->assertStatus(502)
+            ->assertJsonValidationErrors(['statement']);
+    });
+
     test('falls back to the anthropic provider when openai fails', function () {
         config(['ai.providers.anthropic.api_key' => 'test-anthropic-key']);
 

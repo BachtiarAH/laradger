@@ -9,6 +9,7 @@ use App\Http\Resources\AccountResource;
 use App\Models\Account;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class AccountController extends Controller
 {
@@ -20,7 +21,10 @@ class AccountController extends Controller
             ->when(request('type'), fn ($query) => $query->where('type', request('type')))
             ->when(request('currency'), fn ($query) => $query->where('currency', request('currency')))
             ->when(request('status'), fn ($query) => $query->where('status', request('status')))
-            ->when(request('search'), fn ($query) => $query->where('name', 'like', '%'.request('search').'%'))
+            ->when(request('search'), fn ($query) => $query->where(function ($q): void {
+                $search = '%'.request('search').'%';
+                $q->where('name', 'like', $search)->orWhere('code', 'like', $search);
+            }))
             ->orderBy('code')
             ->paginate();
 
@@ -58,7 +62,19 @@ class AccountController extends Controller
     {
         $this->authorize('delete', $account);
 
-        Account::destroy($account->getKey());
+        if ($account->journalLines()->exists()) {
+            throw new ConflictHttpException('The account cannot be deleted because it has journal lines.');
+        }
+
+        if ($account->budgets()->exists()) {
+            throw new ConflictHttpException('The account cannot be deleted because it is linked to budgets.');
+        }
+
+        if ($account->children()->exists()) {
+            throw new ConflictHttpException('The account cannot be deleted because it has child accounts.');
+        }
+
+        $account->delete();
 
         return response()->json(null, 204);
     }

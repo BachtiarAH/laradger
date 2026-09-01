@@ -9,6 +9,7 @@ use App\Http\Resources\UserResource;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -58,10 +59,8 @@ class AuthController extends Controller
         ]);
     }
 
-    public function logout(string $tenant): JsonResponse
+    public function logout(Request $request): JsonResponse
     {
-        $request = request();
-
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'Logged out successfully.']);
