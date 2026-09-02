@@ -3,6 +3,7 @@
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SetTenantContext;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -48,5 +49,21 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             return response()->noContent(401);
+        });
+
+        $exceptions->render(function (ModelNotFoundException $exception, Request $request) {
+            if ($request->is('api/*')) {
+                $model = $exception->getModel();
+                $name = match ($model) {
+                    'App\\Models\\Account' => 'Account',
+                    'App\\Models\\Budget' => 'Budget',
+                    'App\\Models\\Journal' => 'Journal',
+                    'App\\Models\\AuditLog' => 'Audit log',
+                    'App\\Models\\Tag' => 'Tag',
+                    default => str(class_basename($model))->headline()->toString(),
+                };
+
+                return response()->json(['message' => $name.' not found.'], 404);
+            }
         });
     })->create();

@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['tenant_id', 'user_id', 'name', 'description', 'amount', 'starts_at', 'ends_at'])]
+#[Fillable(['tenant_id', 'user_id', 'name', 'description', 'amount', 'period_type', 'is_recurring', 'starts_at', 'ends_at'])]
 class Budget extends Model
 {
     /** @use HasFactory<BudgetFactory> */
@@ -18,6 +18,8 @@ class Budget extends Model
     protected function casts(): array
     {
         return [
+            'period_type' => 'string',
+            'is_recurring' => 'boolean',
             'starts_at' => 'date',
             'ends_at' => 'date',
         ];

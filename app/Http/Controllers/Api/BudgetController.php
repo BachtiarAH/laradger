@@ -7,6 +7,7 @@ use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetRequest;
 use App\Http\Resources\BudgetResource;
 use App\Models\Budget;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -39,6 +40,31 @@ class BudgetController extends Controller
             $query->whereHas('accounts', fn ($accounts) => $accounts->whereKey($request->input('account_id')));
         }
 
+        if ($request->filled('period')) {
+            $period = $request->string('period')->toString();
+            $now = Carbon::now();
+
+            [$start, $end] = match ($period) {
+                'today' => [$now->copy()->startOfDay(), $now->copy()->endOfDay()],
+                'this_week' => [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()],
+                'this_month' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+                default => [null, null],
+            };
+
+            if ($start && $end) {
+                $query->whereDate('starts_at', '<=', $end->toDateString())
+                    ->whereDate('ends_at', '>=', $start->toDateString());
+            }
+        }
+
+        if ($request->filled('period_type')) {
+            $query->where('period_type', $request->string('period_type'));
+        }
+
+        if ($request->filled('is_recurring')) {
+            $query->where('is_recurring', $request->boolean('is_recurring'));
+        }
+
         return BudgetResource::collection($query->latest('starts_at')->paginate());
     }
 
@@ -48,6 +74,8 @@ class BudgetController extends Controller
         $accountIds = $data['account_ids'] ?? [];
         $tagIds = $data['tag_ids'] ?? [];
         unset($data['account_ids'], $data['tag_ids']);
+
+        $data = $this->resolveBudgetDates($data);
 
         $budget = DB::transaction(function () use ($request, $data, $accountIds, $tagIds) {
             $budget = Budget::create([
@@ -79,6 +107,8 @@ class BudgetController extends Controller
         $tagIds = array_key_exists('tag_ids', $data) ? $data['tag_ids'] : null;
         unset($data['account_ids'], $data['tag_ids']);
 
+        $data = $this->resolveBudgetDates($data, $budget);
+
         DB::transaction(function () use ($budget, $data, $accountIds, $tagIds) {
             $budget->update($data);
 
@@ -105,5 +135,46 @@ class BudgetController extends Controller
     private function ensureOwner(Request $request, Budget $budget): void
     {
         abort_unless($request->user()->belongsToTenant($budget->tenant_id), 404);
+    }
+
+    /**
+     * Resolve starts_at/ends_at from budget_month when period_type is monthly.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function resolveBudgetDates(array $data, ?Budget $existing = null): array
+    {
+        $periodType = $data['period_type'] ?? $existing?->period_type ?? 'custom';
+        $budgetMonth = $data['budget_month'] ?? null;
+        unset($data['budget_month']);
+
+        if ($periodType === 'monthly' && $budgetMonth) {
+            $carbon = Carbon::createFromFormat('Y-m', $budgetMonth);
+            if ($carbon) {
+                $data['starts_at'] = $carbon->copy()->startOfMonth()->toDateString();
+                $data['ends_at'] = $carbon->copy()->endOfMonth()->toDateString();
+            }
+        }
+
+        // If monthly without explicit month but also without dates, default to current month
+        if ($periodType === 'monthly' && empty($data['starts_at']) && empty($data['ends_at'])) {
+            if ($existing) {
+                $data['starts_at'] ??= $existing->starts_at?->toDateString();
+                $data['ends_at'] ??= $existing->ends_at?->toDateString();
+            }
+
+            if (empty($data['starts_at']) && empty($data['budget_month'])) {
+                $now = Carbon::now();
+                $data['starts_at'] ??= $now->copy()->startOfMonth()->toDateString();
+                $data['ends_at'] ??= $now->copy()->endOfMonth()->toDateString();
+            }
+        }
+
+        // Normalize defaults
+        $data['period_type'] = $periodType;
+        $data['is_recurring'] = $data['is_recurring'] ?? $existing?->is_recurring ?? false;
+
+        return $data;
     }
 }

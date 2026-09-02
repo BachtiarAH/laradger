@@ -14,6 +14,8 @@ class BudgetResource extends JsonResource
             'name' => $this->name,
             'description' => $this->description,
             'amount' => $this->amount,
+            'period_type' => $this->period_type ?? 'custom',
+            'is_recurring' => (bool) ($this->is_recurring ?? false),
             'starts_at' => $this->starts_at?->toDateString(),
             'ends_at' => $this->ends_at?->toDateString(),
             'created_at' => $this->created_at?->toIso8601String(),
