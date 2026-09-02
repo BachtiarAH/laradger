@@ -46,6 +46,8 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant'])->group(function () {
+        Route::get('accounts/{account}/journal-lines', [AccountController::class, 'journalLines']);
+        Route::get('accounts/{account}/analytics', [AccountController::class, 'analytics']);
         Route::apiResource('accounts', AccountController::class);
         Route::apiResource('journals', JournalController::class);
         Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);

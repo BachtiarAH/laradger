@@ -17,9 +17,23 @@ class JournalLineController extends Controller
     {
         $this->authorize('viewAny', JournalLine::class);
 
-        return JournalLineResource::collection(
-            JournalLine::with('account', 'journal')->paginate()
-        );
+        $lines = JournalLine::with('account', 'journal')
+            ->when(request('account_id'), fn ($q) => $q->where('account_id', request('account_id')))
+            ->when(request('journal_id'), fn ($q) => $q->where('journal_id', request('journal_id')))
+            ->when(request('status'), fn ($q) => $q->whereHas('journal', fn ($jq) => $jq->where('status', request('status'))))
+            ->when(request('from'), fn ($q) => $q->whereHas('journal', fn ($jq) => $jq->whereDate('transaction_date', '>=', request('from'))))
+            ->when(request('to'), fn ($q) => $q->whereHas('journal', fn ($jq) => $jq->whereDate('transaction_date', '<=', request('to'))))
+            ->when(request('search'), function ($q): void {
+                $search = '%'.request('search').'%';
+                $q->where(function ($qq) use ($search): void {
+                    $qq->where('description', 'like', $search)
+                        ->orWhereHas('journal', fn ($jq) => $jq->where('reference', 'like', $search)->orWhere('description', 'like', $search));
+                });
+            })
+            ->latest('created_at')
+            ->paginate((int) (request('per_page', 15)));
+
+        return JournalLineResource::collection($lines);
     }
 
     public function store(string $tenant, StoreJournalLineRequest $request): JsonResponse
