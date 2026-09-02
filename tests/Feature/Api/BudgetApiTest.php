@@ -30,13 +30,14 @@ test('budgets are scoped to the tenant', function () {
 });
 
 test('a budget can be created with accounts and tags', function () {
-    $accounts = Account::factory()->count(2)->create(['tenant_id' => $this->tenant->id]);
+    $accounts = Account::factory()->count(2)->create(['tenant_id' => $this->tenant->id, 'type' => 'expense']);
     $tags = Tag::factory()->count(2)->create(['tenant_id' => $this->tenant->id]);
 
     $this->postJson("/api/v1/{$this->tenant->slug}/budgets", [
         'name' => 'Monthly Needs',
         'description' => 'Essential monthly spending.',
         'amount' => '2500000.00',
+        'budget_type' => 'expense',
         'starts_at' => '2026-08-01',
         'ends_at' => '2026-08-31',
         'account_ids' => $accounts->pluck('id')->all(),

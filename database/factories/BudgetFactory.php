@@ -24,6 +24,7 @@ class BudgetFactory extends Factory
             'name' => $this->faker->words(3, true),
             'description' => $this->faker->optional()->sentence(),
             'amount' => $this->faker->randomFloat(2, 100000, 10000000),
+            'budget_type' => $this->faker->randomElement(['income', 'expense']),
             'period_type' => $this->faker->randomElement(['custom', 'monthly']),
             'is_recurring' => $this->faker->boolean(30),
             'starts_at' => $startsAt->format('Y-m-d'),

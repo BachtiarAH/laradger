@@ -7,6 +7,7 @@ use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetRequest;
 use App\Http\Resources\BudgetResource;
 use App\Models\Budget;
+use App\Models\JournalLine;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -65,7 +66,96 @@ class BudgetController extends Controller
             $query->where('is_recurring', $request->boolean('is_recurring'));
         }
 
-        return BudgetResource::collection($query->latest('starts_at')->paginate());
+        if ($request->filled('budget_type')) {
+            $query->where('budget_type', $request->string('budget_type')->toString());
+        }
+
+        $totalAmount = (clone $query)->sum('amount');
+        $incomeBudgeted = (clone $query)->where('budget_type', 'income')->sum('amount');
+        $expenseBudgeted = (clone $query)->where('budget_type', 'expense')->sum('amount');
+
+        // Determine actual date range from same filters (period / starts_at / ends_at)
+        $actualStart = null;
+        $actualEnd = null;
+
+        if ($request->filled('period')) {
+            $period = $request->string('period')->toString();
+            $now = Carbon::now();
+            [$pStart, $pEnd] = match ($period) {
+                'today' => [$now->copy()->startOfDay(), $now->copy()->endOfDay()],
+                'this_week' => [$now->copy()->startOfWeek(), $now->copy()->endOfWeek()],
+                'this_month' => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+                default => [null, null],
+            };
+            if ($pStart && $pEnd) {
+                $actualStart = $pStart->toDateString();
+                $actualEnd = $pEnd->toDateString();
+            }
+        } elseif ($request->filled('starts_at') || $request->filled('ends_at')) {
+            $actualStart = $request->input('starts_at');
+            $actualEnd = $request->input('ends_at');
+        }
+
+        $incomeActual = 0;
+        $expenseActual = 0;
+
+        $filterBudgetType = $request->filled('budget_type') ? $request->string('budget_type')->toString() : null;
+        $shouldComputeIncome = $filterBudgetType === null || $filterBudgetType === 'income';
+        $shouldComputeExpense = $filterBudgetType === null || $filterBudgetType === 'expense';
+
+        if ($shouldComputeIncome || $shouldComputeExpense) {
+            $baseActualQuery = JournalLine::query()
+                ->whereHas('journal', function ($q) use ($actualStart, $actualEnd, $request) {
+                    $q->whereIn('status', ['posted', 'archived']);
+                    if ($actualStart) {
+                        $q->whereDate('transaction_date', '>=', $actualStart);
+                    }
+                    if ($actualEnd) {
+                        $q->whereDate('transaction_date', '<=', $actualEnd);
+                    }
+                    if ($request->filled('tag_id')) {
+                        $q->whereHas('tags', fn ($qq) => $qq->whereKey($request->input('tag_id')));
+                    }
+                });
+
+            if ($request->filled('account_id')) {
+                $baseActualQuery->where('account_id', $request->input('account_id'));
+            }
+
+            if ($shouldComputeIncome) {
+                $incomeActual = (clone $baseActualQuery)
+                    ->whereHas('account', fn ($q) => $q->where('type', 'income'))
+                    ->sum('credit');
+            }
+
+            if ($shouldComputeExpense) {
+                $expenseActual = (clone $baseActualQuery)
+                    ->whereHas('account', fn ($q) => $q->where('type', 'expense'))
+                    ->sum('debit');
+            }
+        }
+
+        $unbudgetedIncome = (float) $incomeActual - (float) $incomeBudgeted;
+        $remainingExpense = (float) $expenseBudgeted - (float) $expenseActual;
+        $netBudgeted = (float) $incomeBudgeted - (float) $expenseBudgeted;
+
+        $paginator = $query->latest('starts_at')->paginate();
+
+        return BudgetResource::collection($paginator)->additional([
+            'meta' => [
+                'total_amount' => number_format((float) $totalAmount, 2, '.', ''),
+                'summary' => [
+                    'income_budgeted' => number_format((float) $incomeBudgeted, 2, '.', ''),
+                    'expense_budgeted' => number_format((float) $expenseBudgeted, 2, '.', ''),
+                    'total_budgeted' => number_format((float) $totalAmount, 2, '.', ''),
+                    'income_actual' => number_format((float) $incomeActual, 2, '.', ''),
+                    'expense_actual' => number_format((float) $expenseActual, 2, '.', ''),
+                    'unbudgeted_income' => number_format($unbudgetedIncome, 2, '.', ''),
+                    'remaining_expense' => number_format($remainingExpense, 2, '.', ''),
+                    'net_budgeted' => number_format($netBudgeted, 2, '.', ''),
+                ],
+            ],
+        ]);
     }
 
     public function store(string $tenant, StoreBudgetRequest $request): JsonResponse
@@ -174,6 +264,7 @@ class BudgetController extends Controller
         // Normalize defaults
         $data['period_type'] = $periodType;
         $data['is_recurring'] = $data['is_recurring'] ?? $existing?->is_recurring ?? false;
+        $data['budget_type'] = $data['budget_type'] ?? $existing?->budget_type ?? 'expense';
 
         return $data;
     }

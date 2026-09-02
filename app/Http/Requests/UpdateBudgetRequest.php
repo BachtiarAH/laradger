@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Account;
+use App\Models\Budget;
 use App\Tenancy\TenantContext;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -19,6 +21,7 @@ class UpdateBudgetRequest extends FormRequest
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
             'amount' => ['sometimes', 'numeric', 'decimal:0,2', 'gt:0'],
+            'budget_type' => ['sometimes', 'string', Rule::in(['income', 'expense'])],
             'period_type' => ['sometimes', 'string', Rule::in(['custom', 'monthly'])],
             'is_recurring' => ['sometimes', 'boolean'],
             'budget_month' => ['sometimes', 'nullable', 'date_format:Y-m'],
@@ -39,6 +42,22 @@ class UpdateBudgetRequest extends FormRequest
 
             if ($startsAt && $endsAt && $endsAt < $startsAt) {
                 $validator->errors()->add('ends_at', 'The ends_at field must be after or equal to starts_at.');
+            }
+
+            $budget = $this->route('budget');
+            $existingType = $budget instanceof Budget ? $budget->budget_type : null;
+            $budgetType = $this->input('budget_type', $existingType ?? 'expense');
+            $accountIds = $this->input('account_ids');
+
+            if (is_array($accountIds) && count($accountIds) > 0) {
+                $expected = $budgetType === 'income' ? 'income' : 'expense';
+                $mismatched = Account::whereIn('id', $accountIds)
+                    ->where('type', '!=', $expected)
+                    ->exists();
+
+                if ($mismatched) {
+                    $validator->errors()->add('account_ids', 'All linked accounts must match the budget type (income/expense).');
+                }
             }
         });
     }

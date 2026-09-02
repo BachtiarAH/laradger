@@ -493,6 +493,12 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: budget_type
+          in: query
+          description: Filter by budget type (income = ekspektasi pendapatan, expense = anggaran belanja)
+          schema:
+            type: string
+            enum: [income, expense]
       responses:
         '200':
           description: Paginated list of budgets
@@ -1452,6 +1458,10 @@ components:
         amount:
           type: string
           description: Monetary value as a decimal string
+        budget_type:
+          type: string
+          enum: [income, expense]
+          description: Budget type — income (ekspektasi pendapatan) or expense (anggaran belanja)
         period_type:
           type: string
           enum: [custom, monthly]
@@ -1494,6 +1504,11 @@ components:
           type: number
           minimum: 0
           exclusiveMinimum: true
+        budget_type:
+          type: string
+          enum: [income, expense]
+          default: expense
+          description: Budget type — income (pendapatan) or expense (belanja). Linked accounts must match this type.
         period_type:
           type: string
           enum: [custom, monthly]
@@ -1526,6 +1541,7 @@ components:
       example:
         name: Groceries
         amount: 1500.00
+        budget_type: expense
         period_type: monthly
         is_recurring: true
         budget_month: '2026-08'
@@ -1545,6 +1561,9 @@ components:
           type: number
           minimum: 0
           exclusiveMinimum: true
+        budget_type:
+          type: string
+          enum: [income, expense]
         period_type:
           type: string
           enum: [custom, monthly]

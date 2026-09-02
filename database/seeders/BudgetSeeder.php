@@ -19,14 +19,15 @@ class BudgetSeeder extends Seeder
             return;
         }
 
-        $expenseAccounts = Account::query()
-            ->whereIn('code', ['5100', '5200', '5300'])
+        $accounts = Account::query()
+            ->whereIn('code', ['4100', '5100', '5200', '5300'])
             ->pluck('id', 'code');
 
         $budgets = [
             [
                 'name' => 'Monthly Living Expenses',
                 'amount' => 2500000,
+                'budget_type' => 'expense',
                 'starts_at' => '2026-08-01',
                 'ends_at' => '2026-08-31',
                 'account_codes' => ['5100', '5200', '5300'],
@@ -34,9 +35,18 @@ class BudgetSeeder extends Seeder
             [
                 'name' => 'Utilities Budget',
                 'amount' => 500000,
+                'budget_type' => 'expense',
                 'starts_at' => '2026-08-01',
                 'ends_at' => '2026-08-31',
                 'account_codes' => ['5200'],
+            ],
+            [
+                'name' => 'Expected Sales Income',
+                'amount' => 10000000,
+                'budget_type' => 'income',
+                'starts_at' => '2026-08-01',
+                'ends_at' => '2026-08-31',
+                'account_codes' => ['4100'],
             ],
         ];
 
@@ -50,7 +60,7 @@ class BudgetSeeder extends Seeder
             );
 
             $accountIds = collect($accountCodes)
-                ->map(fn (string $code) => $expenseAccounts->get($code))
+                ->map(fn (string $code) => $accounts->get($code))
                 ->filter()
                 ->values();
 

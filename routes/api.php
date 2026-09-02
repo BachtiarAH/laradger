@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
 use App\Http\Controllers\Api\JournalTagController;
+use App\Http\Controllers\Api\OverviewController;
 use App\Http\Controllers\Api\TagController;
 use App\Http\Controllers\Api\TenantController;
 use Illuminate\Support\Facades\Route;
@@ -57,5 +58,6 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('tags', TagController::class);
         Route::apiResource('budgets', BudgetController::class);
         Route::apiResource('audit-logs', AuditLogController::class)->only(['index', 'show']);
+        Route::get('overview', [OverviewController::class, 'index']);
     });
 });
