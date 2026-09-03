@@ -56,7 +56,7 @@ class Journal extends Model
 
     public function lines()
     {
-        return $this->hasMany(JournalLine::class);
+        return $this->hasMany(JournalLine::class)->orderBy('line_number');
     }
 
     public function auditLogs()

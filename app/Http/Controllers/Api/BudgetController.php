@@ -98,42 +98,45 @@ class BudgetController extends Controller
 
         $incomeActual = 0;
         $expenseActual = 0;
+        $otherActual = 0;
 
-        $filterBudgetType = $request->filled('budget_type') ? $request->string('budget_type')->toString() : null;
-        $shouldComputeIncome = $filterBudgetType === null || $filterBudgetType === 'income';
-        $shouldComputeExpense = $filterBudgetType === null || $filterBudgetType === 'expense';
+        $baseActualQuery = JournalLine::query()
+            ->whereHas('journal', function ($q) use ($actualStart, $actualEnd, $request) {
+                $q->whereIn('status', ['posted', 'archived']);
+                if ($actualStart) {
+                    $q->whereDate('transaction_date', '>=', $actualStart);
+                }
+                if ($actualEnd) {
+                    $q->whereDate('transaction_date', '<=', $actualEnd);
+                }
+                if ($request->filled('tag_id')) {
+                    $q->whereHas('tags', fn ($qq) => $qq->whereKey($request->input('tag_id')));
+                }
+            });
 
-        if ($shouldComputeIncome || $shouldComputeExpense) {
-            $baseActualQuery = JournalLine::query()
-                ->whereHas('journal', function ($q) use ($actualStart, $actualEnd, $request) {
-                    $q->whereIn('status', ['posted', 'archived']);
-                    if ($actualStart) {
-                        $q->whereDate('transaction_date', '>=', $actualStart);
-                    }
-                    if ($actualEnd) {
-                        $q->whereDate('transaction_date', '<=', $actualEnd);
-                    }
-                    if ($request->filled('tag_id')) {
-                        $q->whereHas('tags', fn ($qq) => $qq->whereKey($request->input('tag_id')));
-                    }
-                });
-
-            if ($request->filled('account_id')) {
-                $baseActualQuery->where('account_id', $request->input('account_id'));
-            }
-
-            if ($shouldComputeIncome) {
-                $incomeActual = (clone $baseActualQuery)
-                    ->whereHas('account', fn ($q) => $q->where('type', 'income'))
-                    ->sum('credit');
-            }
-
-            if ($shouldComputeExpense) {
-                $expenseActual = (clone $baseActualQuery)
-                    ->whereHas('account', fn ($q) => $q->where('type', 'expense'))
-                    ->sum('debit');
-            }
+        if ($request->filled('account_id')) {
+            $baseActualQuery->where('account_id', $request->input('account_id'));
         }
+
+        // All account types can be budgeted. Income budgets measure credits,
+        // expense budgets measure debits, and balance-sheet accounts
+        // (asset/liability/equity) are measured by their total movement.
+        $incomeActual = (clone $baseActualQuery)
+            ->whereHas('account', fn ($q) => $q->where('type', 'income'))
+            ->sum('credit');
+
+        $expenseActual = (clone $baseActualQuery)
+            ->whereHas('account', fn ($q) => $q->where('type', 'expense'))
+            ->sum('debit');
+
+        $otherQuery = (clone $baseActualQuery)
+            ->whereHas('account', fn ($q) => $q->whereNotIn('type', ['income', 'expense']))
+            ->selectRaw('COALESCE(SUM(debit), 0) as debit, COALESCE(SUM(credit), 0) as credit')
+            ->first();
+
+        $otherActual = (float) ($otherQuery?->debit ?? 0) + (float) ($otherQuery?->credit ?? 0);
+
+        $totalActual = $incomeActual + $expenseActual + $otherActual;
 
         $unbudgetedIncome = (float) $incomeActual - (float) $incomeBudgeted;
         $remainingExpense = (float) $expenseBudgeted - (float) $expenseActual;
@@ -150,6 +153,8 @@ class BudgetController extends Controller
                     'total_budgeted' => number_format((float) $totalAmount, 2, '.', ''),
                     'income_actual' => number_format((float) $incomeActual, 2, '.', ''),
                     'expense_actual' => number_format((float) $expenseActual, 2, '.', ''),
+                    'other_actual' => number_format($otherActual, 2, '.', ''),
+                    'total_actual' => number_format((float) $totalActual, 2, '.', ''),
                     'unbudgeted_income' => number_format($unbudgetedIncome, 2, '.', ''),
                     'remaining_expense' => number_format($remainingExpense, 2, '.', ''),
                     'net_budgeted' => number_format($netBudgeted, 2, '.', ''),
@@ -264,7 +269,7 @@ class BudgetController extends Controller
         // Normalize defaults
         $data['period_type'] = $periodType;
         $data['is_recurring'] = $data['is_recurring'] ?? $existing?->is_recurring ?? false;
-        $data['budget_type'] = $data['budget_type'] ?? $existing?->budget_type ?? 'expense';
+        $data['budget_type'] = $data['budget_type'] ?? $existing?->budget_type;
 
         return $data;
     }

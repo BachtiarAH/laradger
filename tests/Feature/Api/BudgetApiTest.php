@@ -2,6 +2,7 @@
 
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\Journal;
 use App\Models\Tag;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
@@ -95,4 +96,58 @@ test('a budget can be deleted', function () {
     $this->deleteJson("/api/v1/{$this->tenant->slug}/budgets/{$budget->id}")->assertNoContent();
 
     $this->assertDatabaseMissing('budgets', ['id' => $budget->id]);
+});
+
+test('a budget can be created without a budget type', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/budgets", [
+        'name' => 'Cash reserve',
+        'amount' => '5000000.00',
+        'starts_at' => '2026-08-01',
+        'ends_at' => '2026-08-31',
+        'account_ids' => [$account->id],
+    ])->assertCreated()
+        ->assertJsonPath('data.budget_type', null);
+});
+
+test('a budget can link accounts of any type', function () {
+    foreach (['asset', 'liability', 'equity', 'income', 'expense'] as $type) {
+        $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => $type]);
+
+        $this->postJson("/api/v1/{$this->tenant->slug}/budgets", [
+            'name' => "Budget {$type}",
+            'amount' => '1000000.00',
+            'budget_type' => null,
+            'starts_at' => '2026-08-01',
+            'ends_at' => '2026-08-31',
+            'account_ids' => [$account->id],
+        ])->assertCreated()
+            ->assertJsonCount(1, 'data.accounts')
+            ->assertJsonPath('data.accounts.0.id', $account->id);
+    }
+});
+
+test('budget summary includes actual movement for balance-sheet accounts', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $budget = Budget::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'user_id' => $this->user->id,
+        'budget_type' => null,
+        'starts_at' => '2026-08-01',
+        'ends_at' => '2026-08-31',
+    ]);
+
+    $journal = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'status' => 'posted',
+        'transaction_date' => '2026-08-15',
+    ]);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 1000.00, 'credit' => 0, 'description' => 'In']);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 0, 'credit' => 500.00, 'description' => 'Out']);
+
+    $response = $this->getJson("/api/v1/{$this->tenant->slug}/budgets?budget_type=")
+        ->assertOk();
+
+    expect($response->json('meta.summary.other_actual'))->toBe('1500.00');
 });

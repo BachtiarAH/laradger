@@ -2,6 +2,7 @@
 
 use App\Models\Account;
 use App\Models\Journal;
+use App\Models\JournalLine;
 use App\Models\Tag;
 use App\Models\User;
 use App\Services\Ai\Contracts\AiCallRecorder;
@@ -196,6 +197,50 @@ test('a posted journal cannot receive new lines', function () {
         'account_id' => $account->id,
         'debit' => 500.00,
     ])->assertForbidden();
+});
+
+test('journal lines are assigned a sequential line number on create', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Numbered lines',
+        'status' => 'draft',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 100.00, 'description' => 'First'],
+            ['account_id' => $account->id, 'credit' => 100.00, 'description' => 'Second'],
+        ],
+    ])->assertCreated();
+
+    $response->assertJsonPath('data.lines.0.line_number', 1)
+        ->assertJsonPath('data.lines.1.line_number', 2);
+});
+
+test('reordering lines on update persists the new account order', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
+    $first = $journal->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0, 'description' => 'First', 'line_number' => 1]);
+    $second = $journal->lines()->create(['account_id' => $account->id, 'debit' => 0, 'credit' => 100.00, 'description' => 'Second', 'line_number' => 2]);
+
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Reordered',
+        'reference' => $journal->reference,
+        'status' => 'draft',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 0, 'credit' => 100.00, 'description' => 'Second'],
+            ['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0, 'description' => 'First'],
+        ],
+    ])->assertOk()
+        ->assertJsonPath('data.lines.0.line_number', 1)
+        ->assertJsonPath('data.lines.0.description', 'Second')
+        ->assertJsonPath('data.lines.1.line_number', 2)
+        ->assertJsonPath('data.lines.1.description', 'First');
+
+    expect(JournalLine::query()->where('journal_id', $journal->id)->orderBy('line_number')->pluck('description')->all())
+        ->toBe(['Second', 'First']);
 });
 
 test('a journal can be reversed with opposite lines', function () {

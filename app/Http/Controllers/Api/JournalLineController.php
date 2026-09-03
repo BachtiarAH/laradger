@@ -42,7 +42,10 @@ class JournalLineController extends Controller
 
         $this->authorize('update', $journal);
 
-        $line = $journal->lines()->create($request->safe()->except('journal_id'));
+        $line = $journal->lines()->create([
+            ...$request->safe()->except('journal_id'),
+            'line_number' => $journal->lines()->max('line_number') + 1,
+        ]);
 
         return (new JournalLineResource($line->load('account', 'journal')))
             ->response()

@@ -18,6 +18,7 @@ class JournalLineResource extends JsonResource
             'id' => $this->id,
             'journal_id' => $this->journal_id,
             'account_id' => $this->account_id,
+            'line_number' => (int) $this->line_number,
             'debit' => $this->debit,
             'credit' => $this->credit,
             'description' => $this->description,

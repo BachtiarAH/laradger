@@ -49,8 +49,8 @@ class JournalController extends Controller
             callback: fn () => DB::transaction(function () use ($request) {
                 $journal = Journal::create($request->safe()->except(['lines', 'tags', 'ai_record_id']));
 
-                foreach ($request->validated('lines', []) as $line) {
-                    $journal->lines()->create($line);
+                foreach ($request->validated('lines', []) as $index => $line) {
+                    $journal->lines()->create($line + ['line_number' => $index + 1]);
                 }
 
                 $journal->tags()->sync($request->validated('tags', []));
@@ -86,8 +86,8 @@ class JournalController extends Controller
 
             if ($request->has('lines')) {
                 $journal->lines()->delete();
-                foreach ($request->validated('lines', []) as $line) {
-                    $journal->lines()->create($line);
+                foreach ($request->validated('lines', []) as $index => $line) {
+                    $journal->lines()->create($line + ['line_number' => $index + 1]);
                 }
             }
 
@@ -140,9 +140,10 @@ class JournalController extends Controller
                     'reverse_from_id' => $journal->id,
                 ]);
 
-                foreach ($journal->lines as $line) {
+                foreach ($journal->lines as $index => $line) {
                     $reversal->lines()->create([
                         'account_id' => $line->account_id,
+                        'line_number' => $index + 1,
                         'debit' => $line->credit,
                         'credit' => $line->debit,
                         'description' => "Reversal of: {$line->description}",
