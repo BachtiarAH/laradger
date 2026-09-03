@@ -294,3 +294,171 @@ test('overview computes liability balance', function () {
         ->assertOk()
         ->assertJsonPath('data.liabilities.balance', '2500000.00');
 });
+
+test('overview reports assets and net worth from posted journals', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+    $liabilityAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'liability', 'currency' => 'IDR']);
+
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    JournalLine::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $assetAccount->id,
+        'debit' => '5000000.00',
+        'credit' => '0.00',
+    ]);
+    JournalLine::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $liabilityAccount->id,
+        'credit' => '2000000.00',
+        'debit' => '0.00',
+    ]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->assertJsonPath('data.assets.balance', '5000000.00')
+        ->assertJsonPath('data.liabilities.balance', '2000000.00')
+        ->assertJsonPath('data.net_worth', '3000000.00');
+});
+
+test('net worth can be negative when liabilities exceed assets', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+    $liabilityAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'liability', 'currency' => 'IDR']);
+
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    JournalLine::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $assetAccount->id,
+        'debit' => '1000000.00',
+        'credit' => '0.00',
+    ]);
+    JournalLine::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $liabilityAccount->id,
+        'credit' => '4000000.00',
+        'debit' => '0.00',
+    ]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->assertJsonPath('data.assets.balance', '1000000.00')
+        ->assertJsonPath('data.liabilities.balance', '4000000.00')
+        ->assertJsonPath('data.net_worth', '-3000000.00');
+});
+
+test('overview wealth figures ignore draft journals', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+
+    $draft = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
+    JournalLine::factory()->create([
+        'journal_id' => $draft->id,
+        'account_id' => $assetAccount->id,
+        'debit' => '9999999.00',
+        'credit' => '0.00',
+    ]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->assertJsonPath('data.assets.balance', '0.00')
+        ->assertJsonPath('data.net_worth', '0.00');
+});
+
+test('overview returns a 6-month wealth history ending in the current month', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    JournalLine::factory()->create([
+        'journal_id' => $journal->id,
+        'account_id' => $assetAccount->id,
+        'debit' => '5000000.00',
+        'credit' => '0.00',
+    ]);
+
+    $history = $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->json('data.wealth_history');
+
+    expect($history)->toHaveCount(6);
+
+    $labels = array_column($history, 'month');
+    $expected = [];
+    for ($i = 5; $i >= 0; $i--) {
+        $expected[] = Carbon::now()->startOfMonth()->subMonths($i)->format('Y-m');
+    }
+    expect($labels)->toBe($expected);
+
+    // The most recent point matches the current totals.
+    $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->assertJsonPath('data.wealth_history.5.assets', '5000000.00')
+        ->assertJsonPath('data.wealth_history.5.net_worth', '5000000.00');
+});
+
+test('wealth history accumulates balances across month boundaries', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+    $liabilityAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'liability', 'currency' => 'IDR']);
+
+    // 2M asset in the previous month, 3M more asset + 1.5M liability this month.
+    $previousMonth = Carbon::now()->startOfMonth()->subMonth()->addDays(10)->toDateString();
+    $thisMonth = Carbon::now()->startOfMonth()->addDays(5)->toDateString();
+
+    $older = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'transaction_date' => $previousMonth, 'status' => 'posted']);
+    JournalLine::factory()->create(['journal_id' => $older->id, 'account_id' => $assetAccount->id, 'debit' => '2000000.00', 'credit' => '0.00']);
+
+    $newer = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'transaction_date' => $thisMonth, 'status' => 'posted']);
+    JournalLine::factory()->create(['journal_id' => $newer->id, 'account_id' => $assetAccount->id, 'debit' => '3000000.00', 'credit' => '0.00']);
+    JournalLine::factory()->create(['journal_id' => $newer->id, 'account_id' => $liabilityAccount->id, 'credit' => '1500000.00', 'debit' => '0.00']);
+
+    $data = $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->json('data');
+
+    $prevIndex = count($data['wealth_history']) - 2;
+    $lastIndex = count($data['wealth_history']) - 1;
+
+    expect($data['wealth_history'][$prevIndex]['assets'])->toBe('2000000.00');
+    expect($data['wealth_history'][$prevIndex]['liabilities'])->toBe('0.00');
+    expect($data['wealth_history'][$prevIndex]['net_worth'])->toBe('2000000.00');
+    expect($data['wealth_history'][$lastIndex]['assets'])->toBe('5000000.00');
+    expect($data['wealth_history'][$lastIndex]['liabilities'])->toBe('1500000.00');
+    expect($data['wealth_history'][$lastIndex]['net_worth'])->toBe('3500000.00');
+
+    // Point-in-time totals agree with the last history point.
+    expect($data['assets']['balance'])->toBe('5000000.00');
+    expect($data['liabilities']['balance'])->toBe('1500000.00');
+    expect($data['net_worth'])->toBe('3500000.00');
+});
+
+test('wealth history ignores draft journals', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+
+    $draft = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
+    JournalLine::factory()->create([
+        'journal_id' => $draft->id,
+        'account_id' => $assetAccount->id,
+        'debit' => '9999999.00',
+        'credit' => '0.00',
+    ]);
+
+    $history = $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->json('data.wealth_history');
+
+    expect(end($history)['net_worth'])->toBe('0.00');
+});
+
+test('archived journals still count towards wealth figures', function () {
+    $assetAccount = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'currency' => 'IDR']);
+
+    $archived = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'archived']);
+    JournalLine::factory()->create([
+        'journal_id' => $archived->id,
+        'account_id' => $assetAccount->id,
+        'debit' => '2500000.00',
+        'credit' => '0.00',
+    ]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/overview")
+        ->assertOk()
+        ->assertJsonPath('data.assets.balance', '2500000.00')
+        ->assertJsonPath('data.net_worth', '2500000.00');
+});

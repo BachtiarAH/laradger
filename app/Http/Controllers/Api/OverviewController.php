@@ -59,11 +59,47 @@ class OverviewController extends Controller
         $netBudgeted = $incomeBudgeted - $expenseBudgeted;
         $safeMoney = $incomeActual - ($expenseBudgeted + $overspend);
 
+        $postedOnly = fn ($q) => $q->whereIn('status', ['posted', 'archived']);
+
+        $assetBalance = (float) JournalLine::query()
+            ->whereHas('account', fn ($q) => $q->where('type', 'asset'))
+            ->whereHas('journal', $postedOnly)
+            ->selectRaw('COALESCE(SUM(debit),0) - COALESCE(SUM(credit),0) as total')
+            ->value('total');
+
         $liabilityBalance = (float) JournalLine::query()
             ->whereHas('account', fn ($q) => $q->where('type', 'liability'))
-            ->whereHas('journal', fn ($q) => $q->whereIn('status', ['posted', 'archived']))
+            ->whereHas('journal', $postedOnly)
             ->selectRaw('COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) as total')
             ->value('total');
+
+        $netWorth = $assetBalance - $liabilityBalance;
+
+        // Month-end wealth series (posted + archived only) for the last 6 months.
+        $wealthHistory = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = $now->copy()->startOfMonth()->subMonths($i);
+            $asOf = $month->copy()->endOfMonth()->toDateString();
+
+            $asset = (float) JournalLine::query()
+                ->whereHas('account', fn ($q) => $q->where('type', 'asset'))
+                ->whereHas('journal', fn ($q) => $q->whereIn('status', ['posted', 'archived'])->whereDate('transaction_date', '<=', $asOf))
+                ->selectRaw('COALESCE(SUM(debit),0) - COALESCE(SUM(credit),0) as total')
+                ->value('total');
+
+            $liability = (float) JournalLine::query()
+                ->whereHas('account', fn ($q) => $q->where('type', 'liability'))
+                ->whereHas('journal', fn ($q) => $q->whereIn('status', ['posted', 'archived'])->whereDate('transaction_date', '<=', $asOf))
+                ->selectRaw('COALESCE(SUM(credit),0) - COALESCE(SUM(debit),0) as total')
+                ->value('total');
+
+            $wealthHistory[] = [
+                'month' => $month->format('Y-m'),
+                'assets' => number_format($asset, 2, '.', ''),
+                'liabilities' => number_format($liability, 2, '.', ''),
+                'net_worth' => number_format($asset - $liability, 2, '.', ''),
+            ];
+        }
 
         return response()->json([
             'data' => [
@@ -85,9 +121,14 @@ class OverviewController extends Controller
                 'unbudgeted_income' => number_format($unbudgetedIncome, 2, '.', ''),
                 'net_budgeted' => number_format($netBudgeted, 2, '.', ''),
                 'safe_money' => number_format($safeMoney, 2, '.', ''),
+                'assets' => [
+                    'balance' => number_format($assetBalance, 2, '.', ''),
+                ],
                 'liabilities' => [
                     'balance' => number_format($liabilityBalance, 2, '.', ''),
                 ],
+                'net_worth' => number_format($netWorth, 2, '.', ''),
+                'wealth_history' => $wealthHistory,
             ],
         ]);
     }
