@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\NextReferenceController;
 use App\Http\Controllers\Api\OverviewController;
 use App\Http\Controllers\Api\TagController;
 use App\Http\Controllers\Api\TenantController;
+use App\Http\Controllers\Api\UserAdminController;
 use Illuminate\Support\Facades\Route;
 use Symfony\Component\Yaml\Yaml;
 
@@ -47,6 +48,13 @@ Route::prefix('v1')->group(function () {
         Route::get('/tenants', [TenantController::class, 'index']);
         Route::post('/tenants', [TenantController::class, 'store']);
         Route::post('/logout', [AuthController::class, 'logout']);
+    });
+
+    // Platform admin area (no tenant in the URL; requires the 'admin' middleware).
+    Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function () {
+        Route::get('users', [UserAdminController::class, 'index']);
+        Route::post('users', [UserAdminController::class, 'store']);
+        Route::put('users/{user}', [UserAdminController::class, 'update']);
     });
 
     Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant'])->group(function () {

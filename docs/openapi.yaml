@@ -102,6 +102,8 @@ tags:
     description: List the tenants a user belongs to
   - name: Docs
     description: OpenAPI specification endpoint
+  - name: Admin
+    description: Platform admin area — manage all user accounts
 
 security:
   - bearerAuth: []
@@ -336,6 +338,155 @@ paths:
                     type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List all user accounts (platform admin)
+      description: |
+        Platform-admin only. Returns a paginated list of every registered
+        account. Search by name or email and filter by account status.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: search
+          in: query
+          required: false
+          description: Partial match against the user's name or email
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, suspended, terminated]
+      responses:
+        '200':
+          description: Paginated list of user accounts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Admin]
+      summary: Create a user account (platform admin)
+      description: |
+        Platform-admin only. Creates a new account with an initial password set
+        by the admin, which the user can use to log in immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                  description: Initial password shared with the user
+                is_admin:
+                  type: boolean
+                  default: false
+                status:
+                  type: string
+                  enum: [active, suspended, terminated]
+                  default: active
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/users/{user}:
+    put:
+      tags: [Admin]
+      summary: Update a user account (platform admin)
+      description: |
+        Platform-admin only. Update details, reset the password (omit or send
+        empty to keep the current one), or change the account status.
+        Suspending or terminating revokes all active sessions immediately.
+
+        Admin access is **not** editable here: admins are dedicated staff
+        accounts created via `POST /admin/users` with `is_admin: true`, and
+        customer accounts can never be promoted or demoted. An admin can also
+        never change their own status.
+      parameters:
+        - name: user
+          in: path
+          required: true
+          description: User id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                  nullable: true
+                  description: Blank keeps the current password
+                status:
+                  type: string
+                  enum: [active, suspended, terminated]
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /{tenant}/accounts:
     get:
@@ -1583,6 +1734,16 @@ components:
           type: string
           format: date-time
           nullable: true
+        is_admin:
+          type: boolean
+          description: Whether the user has platform admin access
+        status:
+          type: string
+          enum: [active, suspended, terminated]
+          description: |
+            Account status. Only `active` accounts can log in. `suspended` is a
+            temporary block; `terminated` removes the account but can be
+            reverted back to `active` by a platform admin.
         tenants:
           type: array
           description: Tenants the user belongs to (included when loaded)

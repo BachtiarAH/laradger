@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
@@ -48,6 +49,16 @@ class AuthController extends Controller
         if (! $user || ! Hash::check($request->password, $user->password)) {
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        if (! $user->hasActiveStatus()) {
+            $message = $user->status === UserStatus::Terminated
+                ? 'This account has been terminated. Contact an administrator to restore it.'
+                : 'This account is suspended. Contact an administrator to reactivate it.';
+
+            throw ValidationException::withMessages([
+                'email' => [$message],
             ]);
         }
 
