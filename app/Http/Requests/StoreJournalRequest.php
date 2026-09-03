@@ -31,7 +31,7 @@ class StoreJournalRequest extends FormRequest
             'description' => ['required', 'string', 'max:255'],
             'reference' => ['nullable', 'string', 'max:255', Rule::unique('journals', 'reference')->where('tenant_id', TenantContext::id())],
             'status' => ['required', Rule::in(['draft', 'posted', 'archived'])],
-            'source' => ['required', Rule::in(['manual', 'imported', 'system'])],
+            'source' => ['required', Rule::in(['manual', 'imported'])],
             'ai_record_id' => ['nullable', 'uuid'],
             'lines' => ['required', 'array', 'min:1', new BalancedJournalLines],
             'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
