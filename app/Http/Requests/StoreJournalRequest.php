@@ -40,6 +40,11 @@ class StoreJournalRequest extends FormRequest
             'lines.*.description' => ['nullable', 'string', 'max:255'],
             'tags' => ['nullable', 'array'],
             'tags.*' => ['uuid', Rule::exists('tags', 'id')->where('tenant_id', TenantContext::id())],
+            'allocation_adjustments' => ['sometimes', 'array'],
+            'allocation_adjustments.*.action' => ['required', Rule::in(['allocate', 'release'])],
+            'allocation_adjustments.*.allocation_id' => ['required', 'uuid', Rule::exists('allocations', 'id')->where('tenant_id', TenantContext::id())],
+            'allocation_adjustments.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
+            'allocation_adjustments.*.amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0'],
         ];
     }
 }

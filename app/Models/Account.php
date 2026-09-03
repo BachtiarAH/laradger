@@ -72,4 +72,39 @@ class Account extends Model
         return $this->belongsToMany(Budget::class, 'budget_accounts', 'account_id', 'budget_id')
             ->withTimestamps();
     }
+
+    public function allocations()
+    {
+        return $this->belongsToMany(Allocation::class, 'account_allocations', 'account_id', 'allocation_id')
+            ->withPivot('amount')
+            ->withTimestamps();
+    }
+
+    /**
+     * Total amount currently reserved by allocations on this account.
+     */
+    public function allocatedTotal(): float
+    {
+        return (float) $this->allocations()->sum('account_allocations.amount');
+    }
+
+    /**
+     * Net ledger balance for this account from posted and archived journals
+     * only (drafts are not real money yet), signed so it is positive when the
+     * account is on its normal balance side.
+     */
+    public function postedNetBalance(): float
+    {
+        $totals = JournalLine::query()
+            ->where('account_id', $this->id)
+            ->whereHas('journal', fn ($query) => $query->whereIn('status', ['posted', 'archived']))
+            ->selectRaw('COALESCE(SUM(debit), 0) as debit, COALESCE(SUM(credit), 0) as credit')
+            ->first();
+
+        $debit = (float) ($totals->debit ?? 0);
+        $credit = (float) ($totals->credit ?? 0);
+        $isDebitNormal = in_array($this->type, ['asset', 'expense'], true);
+
+        return $isDebitNormal ? $debit - $credit : $credit - $debit;
+    }
 }

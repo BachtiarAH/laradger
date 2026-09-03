@@ -72,6 +72,10 @@ class AccountController extends Controller
             throw new ConflictHttpException('The account cannot be deleted because it has journal lines.');
         }
 
+        if ($account->allocations()->exists()) {
+            throw new ConflictHttpException('The account cannot be deleted because it has allocations. Release them first.');
+        }
+
         if ($account->budgets()->exists()) {
             throw new ConflictHttpException('The account cannot be deleted because it is linked to budgets.');
         }
@@ -105,6 +109,34 @@ class AccountController extends Controller
             ->paginate((int) (request('per_page', 15)));
 
         return JournalLineResource::collection($lines);
+    }
+
+    public function allocations(string $tenant, Account $account): JsonResponse
+    {
+        $this->authorize('view', $account);
+
+        $reservations = $account->allocations()->orderBy('name')->get();
+
+        $totalAllocated = (float) $reservations->sum(fn ($allocation) => (float) $allocation->pivot->amount);
+        $balance = $account->postedNetBalance();
+        $available = max(0.0, $balance);
+
+        return response()->json([
+            'data' => [
+                'account_id' => $account->id,
+                'currency' => $account->currency,
+                'balance' => number_format($balance, 2, '.', ''),
+                'available' => number_format($available, 2, '.', ''),
+                'total_allocated' => number_format($totalAllocated, 2, '.', ''),
+                'unallocated' => number_format($available - $totalAllocated, 2, '.', ''),
+                'over_allocated' => $totalAllocated > $available + 0.0001,
+                'items' => $reservations->map(fn ($allocation) => [
+                    'allocation_id' => $allocation->id,
+                    'name' => $allocation->name,
+                    'amount' => number_format((float) $allocation->pivot->amount, 2, '.', ''),
+                ])->values()->all(),
+            ],
+        ]);
     }
 
     public function analytics(string $tenant, Account $account): JsonResponse

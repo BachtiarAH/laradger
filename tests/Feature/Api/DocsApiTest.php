@@ -23,3 +23,11 @@ test('the openapi specification is served as json when requested', function () {
         ->assertJsonPath('info.title', 'Ledgify API')
         ->assertJsonPath('openapi', '3.1.0');
 });
+
+test('the openapi specification documents the allocation endpoints', function () {
+    $this->getJson('/api/docs')
+        ->assertOk()
+        ->assertJsonPath('paths./{tenant}/allocations.get.summary', 'List allocations')
+        ->assertJsonPath('paths./{tenant}/allocations/{allocation}/allocate.post.summary', 'Allocate money on an account')
+        ->assertJsonPath('paths./{tenant}/accounts/{account}/allocations.get.summary', 'Show the allocation summary for an account');
+});

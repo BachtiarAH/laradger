@@ -3,7 +3,28 @@ info:
   title: Ledgify API
   description: |
     Ledgify is a double-entry ledger application. This API exposes authentication,
-    the chart of accounts, journals (with lines and tags), budgets, and audit logs.
+    the chart of accounts, journals (with lines and tags), budgets, allocations
+    (reserving part of an account balance for a purpose), and audit logs.
+
+    ## Allocations
+
+    Allocations let a user reserve part of an existing account balance for a
+    purpose (e.g. Emergency Fund, Laptop, Vacation). An allocation is **not** an
+    accounting account: allocating or releasing money never creates journal
+    entries and never changes the ledger. The ledger stays the source of truth
+    for where money actually exists.
+
+    - An allocation can span multiple accounts; its total is the sum of the
+      reservations across those accounts.
+    - Money can only be allocated on **asset** accounts, and the total allocated
+      on an account can never exceed its available balance. "Available" is
+      computed from `posted` and `archived` journal lines only — drafts are not
+      real money yet.
+    - Moving money between accounts (a journal) does **not** move allocations;
+      the user reallocates explicitly. An account whose reserved total exceeds
+      its available balance is reported as `over_allocated`.
+    - All allocation changes are recorded in the audit log (`allocation.*`
+      actions) but never produce journal lines.
 
     ## Multi-tenancy
 
@@ -73,6 +94,8 @@ tags:
     description: Tag definitions
   - name: Budgets
     description: Spending budgets linked to accounts and tags
+  - name: Allocations
+    description: Reserve part of an account balance for a purpose
   - name: Audit Logs
     description: Read-only audit trail
   - name: Tenants
@@ -1156,6 +1179,219 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /{tenant}/accounts/{account}/allocations:
+    get:
+      tags: [Allocations]
+      summary: Show the allocation summary for an account
+      description: |
+        Returns the account's posted balance (`balance`), the amount available to
+        allocate (`available`, computed from posted and archived journal lines),
+        how much is currently reserved (`total_allocated`), the leftover
+        (`unallocated`), and the per-allocation reservations in `items`.
+
+        `over_allocated` is `true` when spending has left the account with more
+        reserved than it has available — the user should release or reallocate.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Allocation summary for the account
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AccountAllocations'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /{tenant}/allocations:
+    get:
+      tags: [Allocations]
+      summary: List allocations
+      description: Lists allocations with their total reserved across all accounts. Filter with `search` (partial name match).
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: search
+          in: query
+          description: Partial match against the allocation name
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of allocations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Allocation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Allocations]
+      summary: Create an allocation
+      description: Creates the allocation definition (name and optional target amount). Money is reserved later via the allocate endpoint.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocationStore'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Allocation'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/allocations/{allocation}:
+    parameters:
+      - $ref: '#/components/parameters/Tenant'
+      - $ref: '#/components/parameters/AllocationId'
+    get:
+      tags: [Allocations]
+      summary: Show an allocation
+      description: Returns the allocation with its per-account reservations and the total reserved across all accounts.
+      responses:
+        '200':
+          description: Allocation with account reservations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Allocation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Allocations]
+      summary: Update an allocation
+      description: Renames the allocation or changes its description / target amount. Existing reservations are untouched.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocationUpdate'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Allocation'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Allocations]
+      summary: Delete an allocation
+      description: Deletes the allocation and releases all of its reservations. The release is recorded in the audit log.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /{tenant}/allocations/{allocation}/allocate:
+    post:
+      tags: [Allocations]
+      summary: Allocate money on an account
+      description: |
+        Reserves `amount` of the account's available balance for this allocation.
+        The account must be an **asset** account, and the account's total
+        reserved amount (across all allocations) may not exceed its available
+        balance. This never creates a journal entry.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/AllocationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocationAdjust'
+      responses:
+        '200':
+          description: Allocation updated with the new reservation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Allocation'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /{tenant}/allocations/{allocation}/release:
+    post:
+      tags: [Allocations]
+      summary: Release money from an account reservation
+      description: |
+        Releases `amount` of this allocation's reservation on the account, making
+        it unallocated again. When the reservation reaches zero it is removed.
+        This never creates a journal entry.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/AllocationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocationAdjust'
+      responses:
+        '200':
+          description: Allocation updated with the remaining reservation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Allocation'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1225,6 +1461,13 @@ components:
         format: uuid
     BudgetId:
       name: budget
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AllocationId:
+      name: allocation
       in: path
       required: true
       schema:
@@ -1589,6 +1832,137 @@ components:
             type: string
             format: uuid
 
+    Allocation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        target_amount:
+          type: string
+          nullable: true
+          description: Optional savings goal as a decimal string
+        total_allocated:
+          type: string
+          description: Total amount reserved across all accounts, as a decimal string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        accounts:
+          type: array
+          description: Per-account reservations (included on show/detail)
+          items:
+            type: object
+            properties:
+              account_id:
+                type: string
+                format: uuid
+              code:
+                type: string
+              name:
+                type: string
+              currency:
+                type: string
+              amount:
+                type: string
+                description: Amount reserved on this account, as a decimal string
+
+    AllocationStore:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        target_amount:
+          type: number
+          minimum: 0
+          description: Optional savings goal
+      example:
+        name: Emergency Fund
+        description: Rainy day money.
+        target_amount: 10000000.00
+
+    AllocationUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+        target_amount:
+          type: number
+          minimum: 0
+          nullable: true
+
+    AllocationAdjust:
+      type: object
+      required: [account_id, amount]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+          description: Must be an asset account in the current tenant
+        amount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Positive amount to allocate or release
+      example:
+        account_id: 019fe4f1-0000-0000-0000-000000000001
+        amount: 3000000.00
+
+    AccountAllocations:
+      type: object
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        balance:
+          type: string
+          description: Posted and archived net balance of the account, as a decimal string
+        available:
+          type: string
+          description: Amount available to allocate (posted balance, floored at zero)
+        total_allocated:
+          type: string
+          description: Total reserved on the account across all allocations
+        unallocated:
+          type: string
+          description: available minus total_allocated; negative when over-allocated
+        over_allocated:
+          type: boolean
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              allocation_id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              amount:
+                type: string
+                description: Amount reserved on this account, as a decimal string
+
     JournalDraft:
       type: object
       properties:
@@ -1673,6 +2047,32 @@ components:
       type: object
       required: [transaction_date, description, status, source, lines]
       properties:
+        allocation_adjustments:
+          type: array
+          description: |
+            Optional allocation changes (allocate/release) applied **atomically**
+            with the journal. Only allowed when `status` is `posted` — a draft
+            journal returns `422` because drafts are not real money yet. The
+            available-balance cap for `allocate` is computed **after** the new
+            journal lines are posted.
+          items:
+            type: object
+            required: [action, allocation_id, account_id, amount]
+            properties:
+              action:
+                type: string
+                enum: [allocate, release]
+              allocation_id:
+                type: string
+                format: uuid
+              account_id:
+                type: string
+                format: uuid
+                description: Must be an asset account in the current tenant
+              amount:
+                type: number
+                minimum: 0
+                exclusiveMinimum: true
         transaction_date:
           type: string
           format: date

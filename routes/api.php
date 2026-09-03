@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\AiJournalDraftController;
+use App\Http\Controllers\Api\AllocationController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
@@ -53,7 +54,11 @@ Route::prefix('v1')->group(function () {
         Route::get('accounts/next-code', [NextReferenceController::class, 'accountCode']);
         Route::get('accounts/{account}/journal-lines', [AccountController::class, 'journalLines']);
         Route::get('accounts/{account}/analytics', [AccountController::class, 'analytics']);
+        Route::get('accounts/{account}/allocations', [AccountController::class, 'allocations']);
         Route::apiResource('accounts', AccountController::class);
+        Route::apiResource('allocations', AllocationController::class);
+        Route::post('allocations/{allocation}/allocate', [AllocationController::class, 'allocate']);
+        Route::post('allocations/{allocation}/release', [AllocationController::class, 'release']);
         Route::apiResource('journals', JournalController::class);
         Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);
         Route::post('journals/{journal}/reverse', [JournalController::class, 'reverse']);

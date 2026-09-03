@@ -6,13 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreJournalRequest;
 use App\Http\Requests\UpdateJournalRequest;
 use App\Http\Resources\JournalResource;
+use App\Models\Account;
+use App\Models\Allocation;
 use App\Models\Journal;
 use App\Services\Ai\Contracts\AiCallRecorder;
+use App\Services\AllocationAdjustmentService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Throwable;
 
@@ -20,6 +24,7 @@ class JournalController extends Controller
 {
     public function __construct(
         private readonly AiCallRecorder $aiCallRecorder,
+        private readonly AllocationAdjustmentService $allocationAdjustments,
     ) {}
 
     public function index(string $tenant): AnonymousResourceCollection
@@ -55,6 +60,8 @@ class JournalController extends Controller
 
                 $journal->tags()->sync($request->validated('tags', []));
 
+                $this->applyAllocationAdjustments($journal, $request->validated('allocation_adjustments', []));
+
                 if ($recordId = $request->validated('ai_record_id')) {
                     $this->aiCallRecorder->confirm($recordId, $journal);
                 }
@@ -68,6 +75,47 @@ class JournalController extends Controller
         return (new JournalResource($journal->load('lines.account', 'tags')))
             ->response()
             ->setStatusCode(201);
+    }
+
+    /**
+     * Allocation changes only make sense on posted journals: drafts are not
+     * real money yet. Everything runs inside the caller's transaction so a
+     * failing adjustment rolls the whole journal back.
+     *
+     * @param  array<int, array{action: string, allocation_id: string, account_id: string, amount: string|float}>  $adjustments
+     */
+    private function applyAllocationAdjustments(Journal $journal, array $adjustments): void
+    {
+        if ($adjustments === []) {
+            return;
+        }
+
+        if ($journal->status !== 'posted') {
+            throw ValidationException::withMessages([
+                'status' => 'Allocation adjustments can only be applied to a posted journal.',
+            ]);
+        }
+
+        foreach ($adjustments as $index => $adjustment) {
+            try {
+                $account = Account::query()->whereKey($adjustment['account_id'])->firstOrFail();
+                $allocation = Allocation::query()->whereKey($adjustment['allocation_id'])->firstOrFail();
+
+                $amount = (float) $adjustment['amount'];
+
+                if ($adjustment['action'] === 'allocate') {
+                    $this->allocationAdjustments->allocate($allocation, $account, $amount);
+                } else {
+                    $this->allocationAdjustments->release($allocation, $account, $amount);
+                }
+            } catch (ValidationException $exception) {
+                $message = collect($exception->errors())->flatten()->first() ?? $exception->getMessage();
+
+                throw ValidationException::withMessages([
+                    "allocation_adjustments.{$index}" => $message,
+                ]);
+            }
+        }
     }
 
     public function show(string $tenant, Journal $journal): JournalResource
