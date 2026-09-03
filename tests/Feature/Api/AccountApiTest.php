@@ -139,14 +139,14 @@ test('account codes are sequential per type', function () {
     $response->assertCreated()->assertJsonPath('data.code', 'AS-0002');
 });
 
-test('account codes cannot be provided by the client', function () {
+test('a custom account code can be provided by the client', function () {
     $this->postJson("/api/v1/{$this->tenant->slug}/accounts", [
         'code' => 'CUSTOM-1',
         'name' => 'Petty Cash',
         'type' => 'asset',
         'currency' => 'IDR',
         'status' => 'active',
-    ])->assertStatus(422)->assertJsonValidationErrors(['code']);
+    ])->assertCreated()->assertJsonPath('data.code', 'CUSTOM-1');
 });
 
 test('creating an account validates required fields', function () {

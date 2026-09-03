@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
 use App\Http\Controllers\Api\JournalTagController;
+use App\Http\Controllers\Api\NextReferenceController;
 use App\Http\Controllers\Api\OverviewController;
 use App\Http\Controllers\Api\TagController;
 use App\Http\Controllers\Api\TenantController;
@@ -47,6 +48,8 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant'])->group(function () {
+        Route::get('journals/next-reference', [NextReferenceController::class, 'journalReference']);
+        Route::get('accounts/next-code', [NextReferenceController::class, 'accountCode']);
         Route::get('accounts/{account}/journal-lines', [AccountController::class, 'journalLines']);
         Route::get('accounts/{account}/analytics', [AccountController::class, 'analytics']);
         Route::apiResource('accounts', AccountController::class);

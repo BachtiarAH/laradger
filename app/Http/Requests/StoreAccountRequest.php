@@ -26,7 +26,7 @@ class StoreAccountRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'code' => ['prohibited'],
+            'code' => ['nullable', 'string', 'max:20', Rule::unique('accounts', 'code')->where('tenant_id', TenantContext::id())],
             'name' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in(['asset', 'liability', 'equity', 'income', 'expense'])],
             'parent_id' => ['nullable', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
