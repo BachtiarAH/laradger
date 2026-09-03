@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BudgetController;
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
 use App\Http\Controllers\Api\JournalTagController;
+use App\Http\Controllers\Api\JournalTemplateController;
 use App\Http\Controllers\Api\NextReferenceController;
 use App\Http\Controllers\Api\OverviewController;
 use App\Http\Controllers\Api\TagController;
@@ -56,6 +57,8 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('journals', JournalController::class);
         Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);
         Route::post('journals/{journal}/reverse', [JournalController::class, 'reverse']);
+        Route::apiResource('journal-templates', JournalTemplateController::class);
+        Route::post('journal-templates/{journal_template}/generate', [JournalTemplateController::class, 'generate']);
         Route::apiResource('journal-lines', JournalLineController::class);
         Route::apiResource('journal-tags', JournalTagController::class)->only(['index', 'store']);
         Route::apiResource('tags', TagController::class);

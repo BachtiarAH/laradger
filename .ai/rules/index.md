@@ -9,3 +9,4 @@ Before planning or editing, find the row whose globs match the file's path and r
 | database/migrations/** | .ai/rules/migrations.md |
 | database/** (and destructive artisan db commands) | .ai/rules/database.md |
 | app/Models/** | .ai/rules/models.md |
+| app/Models/JournalTemplate*.php, app/Services/JournalTemplateService.php, app/Console/Commands/ProcessJournalTemplates.php | .ai/rules/journal-templates.md |

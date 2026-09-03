@@ -17,6 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withSchedule(function ($schedule) {
+        $schedule->command('journal-templates:process')->dailyAt('06:00');
+    })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             SetTenantContext::class,
@@ -58,6 +61,7 @@ return Application::configure(basePath: dirname(__DIR__))
                     'App\\Models\\Account' => 'Account',
                     'App\\Models\\Budget' => 'Budget',
                     'App\\Models\\Journal' => 'Journal',
+                    'App\\Models\\JournalTemplate' => 'Journal template',
                     'App\\Models\\AuditLog' => 'Audit log',
                     'App\\Models\\Tag' => 'Tag',
                     default => str(class_basename($model))->headline()->toString(),
