@@ -25,6 +25,19 @@ test('journals can be listed and filtered by status', function () {
         ->assertJsonCount(2, 'data');
 });
 
+test('journal list includes line count and debit/credit totals', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 1000.00, 'credit' => 0, 'description' => 'Dr']);
+    $journal->lines()->create(['account_id' => $account->id, 'debit' => 0, 'credit' => 1000.00, 'description' => 'Cr']);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals")
+        ->assertOk()
+        ->assertJsonPath('data.0.lines_count', 2)
+        ->assertJsonPath('data.0.total_debit', '1000.00')
+        ->assertJsonPath('data.0.total_credit', '1000.00');
+});
+
 test('a journal can be created with lines and tags', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
     $tag = Tag::factory()->create(['tenant_id' => $this->tenant->id]);

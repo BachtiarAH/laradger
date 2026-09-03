@@ -59,6 +59,58 @@ test('accounts can be searched by name', function () {
         ->assertJsonPath('data.0.name', 'Petty Cash');
 });
 
+test('account list includes balance aggregates', function () {
+    $asset = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $liability = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'liability']);
+
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $journal->lines()->create(['account_id' => $asset->id, 'debit' => 150.00, 'credit' => 30.00]);
+    $journal->lines()->create(['account_id' => $liability->id, 'debit' => 40.00, 'credit' => 100.00]);
+
+    $data = $this->getJson("/api/v1/{$this->tenant->slug}/accounts")->assertOk()->json('data');
+
+    $assetRow = collect($data)->firstWhere('id', $asset->id);
+    $liabilityRow = collect($data)->firstWhere('id', $liability->id);
+
+    expect($assetRow)->not->toBeNull();
+    expect($assetRow['total_debit'])->toBe('150.00');
+    expect($assetRow['total_credit'])->toBe('30.00');
+    expect($assetRow['net'])->toBe('120.00');
+    expect($assetRow['balance'])->toBe('120.00');
+    expect($assetRow['balance_side'])->toBe('debit');
+
+    expect($liabilityRow)->not->toBeNull();
+    expect($liabilityRow['total_debit'])->toBe('40.00');
+    expect($liabilityRow['total_credit'])->toBe('100.00');
+    expect($liabilityRow['balance'])->toBe('60.00');
+    expect($liabilityRow['balance_side'])->toBe('credit');
+});
+
+test('an account without transactions has a zero balance', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+
+    $data = $this->getJson("/api/v1/{$this->tenant->slug}/accounts")->assertOk()->json('data');
+
+    $row = collect($data)->firstWhere('id', $account->id);
+
+    expect($row)->not->toBeNull();
+    expect($row['total_debit'])->toBe('0.00');
+    expect($row['total_credit'])->toBe('0.00');
+    expect($row['balance'])->toBe('0.00');
+    expect($row['balance_side'])->toBe('debit');
+});
+
+test('single account responses do not include balance aggregates', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+
+    $row = $this->getJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")
+        ->assertOk()
+        ->json('data');
+
+    expect($row)->not->toHaveKey('total_debit');
+    expect($row)->not->toHaveKey('balance');
+});
+
 test('an account can be created', function () {
     $response = $this->postJson("/api/v1/{$this->tenant->slug}/accounts", [
         'name' => 'Petty Cash',

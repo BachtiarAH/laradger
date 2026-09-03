@@ -14,7 +14,7 @@ class JournalResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        return [
+        $data = [
             'id' => $this->id,
             'transaction_date' => $this->transaction_date?->toIso8601String(),
             'description' => $this->description,
@@ -27,5 +27,15 @@ class JournalResource extends JsonResource
             'lines' => JournalLineResource::collection($this->whenLoaded('lines')),
             'tags' => TagResource::collection($this->whenLoaded('tags')),
         ];
+
+        // Line aggregates are only available when the listing query
+        // loads them via withCount/withSum.
+        if (array_key_exists('lines_sum_debit', $this->getAttributes())) {
+            $data['total_debit'] = number_format((float) ($this->lines_sum_debit ?? 0), 2, '.', '');
+            $data['total_credit'] = number_format((float) ($this->lines_sum_credit ?? 0), 2, '.', '');
+            $data['lines_count'] = (int) ($this->lines_count ?? 0);
+        }
+
+        return $data;
     }
 }

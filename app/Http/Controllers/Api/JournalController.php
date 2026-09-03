@@ -26,7 +26,10 @@ class JournalController extends Controller
     {
         $this->authorize('viewAny', Journal::class);
 
-        $journals = Journal::with('lines.account', 'tags')
+        $journals = Journal::withCount('lines')
+            ->withSum('lines', 'debit')
+            ->withSum('lines', 'credit')
+            ->with('tags')
             ->when(request('status'), fn ($query) => $query->where('status', request('status')))
             ->when(request('source'), fn ($query) => $query->where('source', request('source')))
             ->when(request('from'), fn ($query) => $query->whereDate('transaction_date', '>=', request('from')))

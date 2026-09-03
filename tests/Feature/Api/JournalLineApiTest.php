@@ -126,14 +126,19 @@ test('journal tags can be attached', function () {
     ]);
 });
 
-test('tags cannot be attached to a posted journal', function () {
+test('tags can be attached to a posted journal', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
     $tag = Tag::factory()->create(['tenant_id' => $this->tenant->id]);
 
     $this->postJson("/api/v1/{$this->tenant->slug}/journal-tags", [
         'journal_id' => $journal->id,
         'tag_id' => $tag->id,
-    ])->assertForbidden();
+    ])->assertCreated();
+
+    $this->assertDatabaseHas('journal_tags', [
+        'journal_id' => $journal->id,
+        'tag_id' => $tag->id,
+    ]);
 });
 
 test('audit logs can be listed', function () {

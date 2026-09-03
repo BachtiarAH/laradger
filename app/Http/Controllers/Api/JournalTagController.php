@@ -25,7 +25,7 @@ class JournalTagController extends Controller
     {
         $journal = Journal::findOrFail($request->validated('journal_id'));
 
-        $this->authorize('update', $journal);
+        abort_unless($request->user()->belongsToTenant($journal->tenant_id), 403);
 
         $journalTag = JournalTag::create($request->validated());
 

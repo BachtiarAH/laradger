@@ -14,7 +14,7 @@ class AccountResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        return [
+        $data = [
             'id' => $this->id,
             'code' => $this->code,
             'name' => $this->name,
@@ -27,5 +27,29 @@ class AccountResource extends JsonResource
             'parent' => $this->whenLoaded('parent', fn () => new self($this->parent)),
             'children' => self::collection($this->whenLoaded('children')),
         ];
+
+        // Balance aggregates are only available when the list query
+        // eagerly loads them via withSum.
+        if (array_key_exists('total_debit', $this->getAttributes())) {
+            $totalDebit = (float) ($this->total_debit ?? 0);
+            $totalCredit = (float) ($this->total_credit ?? 0);
+
+            // Normal balance side: debit for asset/expense, credit otherwise.
+            $isDebitNormal = in_array($this->type, ['asset', 'expense'], true);
+            $net = $isDebitNormal
+                ? $totalDebit - $totalCredit
+                : $totalCredit - $totalDebit;
+            $balanceSide = $net >= 0
+                ? ($isDebitNormal ? 'debit' : 'credit')
+                : ($isDebitNormal ? 'credit' : 'debit');
+
+            $data['total_debit'] = number_format($totalDebit, 2, '.', '');
+            $data['total_credit'] = number_format($totalCredit, 2, '.', '');
+            $data['net'] = number_format($net, 2, '.', '');
+            $data['balance'] = number_format(abs($net), 2, '.', '');
+            $data['balance_side'] = $balanceSide;
+        }
+
+        return $data;
     }
 }
