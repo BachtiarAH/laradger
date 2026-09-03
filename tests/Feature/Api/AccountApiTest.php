@@ -200,3 +200,31 @@ test('an account with journal lines cannot be deleted and returns a conflict', f
 
     expect(Account::query()->find($account->id))->not->toBeNull();
 });
+
+test('accounts are sorted hierarchically with depth information', function () {
+    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1000', 'name' => 'Assets', 'type' => 'asset']);
+    $child1 = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'parent_id' => $parent->id]);
+    $child2 = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1200', 'name' => 'Bank', 'type' => 'asset', 'parent_id' => $parent->id]);
+    $unrelated = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '2000', 'name' => 'Liabilities', 'type' => 'liability']);
+
+    $data = $this->getJson("/api/v1/{$this->tenant->slug}/accounts")->assertOk()->json('data');
+
+    // Verify depth is correct
+    $parentRow = collect($data)->firstWhere('id', $parent->id);
+    $child1Row = collect($data)->firstWhere('id', $child1->id);
+    $child2Row = collect($data)->firstWhere('id', $child2->id);
+    $unrelatedRow = collect($data)->firstWhere('id', $unrelated->id);
+
+    expect($parentRow['depth'])->toBe(0);
+    expect($child1Row['depth'])->toBe(1);
+    expect($child2Row['depth'])->toBe(1);
+    expect($unrelatedRow['depth'])->toBe(0);
+
+    // Verify hierarchical ordering (parents before children)
+    $parentIndex = array_search($parent->id, array_column($data, 'id'));
+    $child1Index = array_search($child1->id, array_column($data, 'id'));
+    $child2Index = array_search($child2->id, array_column($data, 'id'));
+
+    expect($parentIndex)->toBeLessThan($child1Index);
+    expect($parentIndex)->toBeLessThan($child2Index);
+});

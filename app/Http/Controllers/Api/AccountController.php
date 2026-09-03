@@ -10,8 +10,10 @@ use App\Http\Resources\JournalLineResource;
 use App\Models\Account;
 use App\Models\JournalLine;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
@@ -21,7 +23,7 @@ class AccountController extends Controller
     {
         $this->authorize('viewAny', Account::class);
 
-        $accounts = Account::with('parent')
+        $query = Account::with('parent')
             ->withSum('journalLines as total_debit', 'debit')
             ->withSum('journalLines as total_credit', 'credit')
             ->when(request('type'), fn ($query) => $query->where('type', request('type')))
@@ -30,11 +32,54 @@ class AccountController extends Controller
             ->when(request('search'), fn ($query) => $query->where(function ($q): void {
                 $search = '%'.request('search').'%';
                 $q->where('name', 'like', $search)->orWhere('code', 'like', $search);
-            }))
-            ->orderBy('code')
-            ->paginate();
+            }));
 
-        return AccountResource::collection($accounts);
+        // Get all accounts first to build hierarchical structure
+        $allAccounts = $query->orderBy('code')->get();
+
+        // Build hierarchical structure with depth
+        $accounts = $this->buildHierarchicalAccounts($allAccounts);
+
+        // Manually paginate the hierarchical result
+        $perPage = (int) (request('per_page', 15));
+        $currentPage = (int) (request('page', 1));
+        $total = $accounts->count();
+        $slicedAccounts = $accounts->slice(($currentPage - 1) * $perPage, $perPage);
+
+        $paginator = new LengthAwarePaginator(
+            $slicedAccounts,
+            $total,
+            $perPage,
+            $currentPage,
+            ['path' => request()->url(), 'query' => request()->query()]
+        );
+
+        return AccountResource::collection($paginator);
+    }
+
+    /**
+     * Build hierarchical account structure with depth information.
+     */
+    private function buildHierarchicalAccounts(Collection $accounts): Collection
+    {
+        // Create a map for quick lookup
+        $accountMap = $accounts->keyBy('id');
+
+        // Calculate depth for each account
+        $accounts->transform(function ($account) use ($accountMap) {
+            $depth = 0;
+            $current = $account;
+            while ($current->parent_id && isset($accountMap[$current->parent_id])) {
+                $depth++;
+                $current = $accountMap[$current->parent_id];
+            }
+            $account->setAttribute('depth', $depth);
+
+            return $account;
+        });
+
+        // Sort by depth first, then by code within each depth level
+        return $accounts->sortBy(fn ($account) => [$account->depth, $account->code])->values();
     }
 
     public function store(string $tenant, StoreAccountRequest $request): JsonResponse
@@ -42,6 +87,7 @@ class AccountController extends Controller
         $this->authorize('create', Account::class);
 
         $account = Account::create($request->validated());
+        $account->setAttribute('depth', 0);
 
         return (new AccountResource($account->load('parent')))
             ->response()
@@ -52,6 +98,8 @@ class AccountController extends Controller
     {
         $this->authorize('view', $account);
 
+        $account->setAttribute('depth', 0);
+
         return new AccountResource($account->load(['parent', 'children']));
     }
 
@@ -60,6 +108,7 @@ class AccountController extends Controller
         $this->authorize('update', $account);
 
         $account->update($request->validated());
+        $account->setAttribute('depth', 0);
 
         return new AccountResource($account->fresh('parent'));
     }

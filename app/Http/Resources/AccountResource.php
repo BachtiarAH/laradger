@@ -22,6 +22,7 @@ class AccountResource extends JsonResource
             'parent_id' => $this->parent_id,
             'currency' => $this->currency,
             'status' => $this->status,
+            'depth' => $this->getAttribute('depth') ?? 0,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
             'parent' => $this->whenLoaded('parent', fn () => new self($this->parent)),
