@@ -16,11 +16,11 @@ class TagSeeder extends Seeder
         $tenantId = TenantContext::id();
 
         $tags = [
-            ['name' => 'Priority', 'type' => 'priority'],
-            ['name' => 'Recurring', 'type' => 'recurring'],
-            ['name' => 'Vendor', 'type' => 'vendor'],
-            ['name' => 'Taxable', 'type' => 'tax'],
-            ['name' => 'Internal Transfer', 'type' => 'transfer'],
+            ['name' => 'Rutin', 'type' => 'recurring'],
+            ['name' => 'Mendesak', 'type' => 'priority'],
+            ['name' => 'Antar Rekening', 'type' => 'transfer'],
+            ['name' => 'Pajak', 'type' => 'tax'],
+            ['name' => 'Online Shop', 'type' => 'vendor'],
         ];
 
         foreach ($tags as $tagData) {

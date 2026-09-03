@@ -10,27 +10,45 @@ class JournalTagSeeder extends Seeder
 {
     /**
      * Run the database seeds.
+     *
+     * Mirrors the plan in JournalSeeder, tagging each journal by reference.
      */
     public function run(): void
     {
-        $journalTags = [
-            'JRN-0001' => ['Priority'],
-            'JRN-0002' => ['Vendor', 'Recurring'],
-            'JRN-0003' => ['Priority', 'Taxable'],
-            'JRN-0004' => ['Recurring', 'Priority'],
-            'JRN-0005' => ['Taxable'],
-        ];
+        $tagsFor = fn (string $key): array => match ($key) {
+            'GAJI' => ['Rutin', 'Mendesak'],
+            'TOPUP', 'BRI_TRF' => ['Antar Rekening'],
+            'UTIL', 'UTIL_DRAFT' => ['Rutin'],
+            'KES' => ['Mendesak'],
+            'MAKAN2' => ['Online Shop'],
+            default => [],
+        };
 
-        foreach ($journalTags as $reference => $tagNames) {
-            $journal = Journal::where('reference', $reference)->first();
+        foreach ([0, 1, 2] as $index) {
+            $month = now()->startOfMonth()->subMonths(2)->addMonths($index);
+            $prefix = 'JRN-DEMO-'.$month->format('Ymd');
 
-            if (! $journal) {
-                continue;
+            $keys = $index === 0 ? ['OPEN', 'GAJI', 'MAKAN'] : ['GAJI', 'MAKAN'];
+
+            if ($index < 2) {
+                array_push($keys, 'TOPUP', 'MAKAN2', 'TRANSP', 'UTIL', 'BELANJA', 'BRI_TRF', 'HIBURAN', 'KES');
+            } else {
+                $keys[] = 'UTIL_DRAFT';
             }
 
-            $tagIds = Tag::whereIn('name', $tagNames)->pluck('id');
+            foreach ($keys as $key) {
+                $journal = Journal::where('reference', $prefix.'-'.$key)->first();
 
-            $journal->tags()->syncWithoutDetaching($tagIds);
+                if (! $journal) {
+                    continue;
+                }
+
+                $tagIds = Tag::whereIn('name', $tagsFor($key))->pluck('id');
+
+                if ($tagIds->isNotEmpty()) {
+                    $journal->tags()->syncWithoutDetaching($tagIds);
+                }
+            }
         }
     }
 }

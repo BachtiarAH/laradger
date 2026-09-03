@@ -19,34 +19,47 @@ class BudgetSeeder extends Seeder
             return;
         }
 
-        $accounts = Account::query()
-            ->whereIn('code', ['4100', '5100', '5200', '5300'])
-            ->pluck('id', 'code');
+        $from = now()->startOfMonth();
+        $to = now()->endOfMonth();
 
         $budgets = [
             [
-                'name' => 'Monthly Living Expenses',
-                'amount' => 2500000,
-                'budget_type' => 'expense',
-                'starts_at' => '2026-08-01',
-                'ends_at' => '2026-08-31',
-                'account_codes' => ['5100', '5200', '5300'],
-            ],
-            [
-                'name' => 'Utilities Budget',
-                'amount' => 500000,
-                'budget_type' => 'expense',
-                'starts_at' => '2026-08-01',
-                'ends_at' => '2026-08-31',
-                'account_codes' => ['5200'],
-            ],
-            [
-                'name' => 'Expected Sales Income',
-                'amount' => 10000000,
+                'name' => 'Gaji Bulanan',
+                'description' => 'Ekspektasi gaji masuk setiap bulan.',
+                'amount' => 8_500_000,
                 'budget_type' => 'income',
-                'starts_at' => '2026-08-01',
-                'ends_at' => '2026-08-31',
-                'account_codes' => ['4100'],
+                'account_codes' => ['GAJI'],
+            ],
+            [
+                'name' => 'Makanan & Minuman',
+                'description' => 'Anggaran belanja harian.',
+                'amount' => 1_800_000,
+                'budget_type' => 'expense',
+                'account_codes' => ['MAKAN'],
+            ],
+            [
+                'name' => 'Transportasi',
+                'amount' => 500_000,
+                'budget_type' => 'expense',
+                'account_codes' => ['TRANSPORT'],
+            ],
+            [
+                'name' => 'Listrik & Air',
+                'amount' => 700_000,
+                'budget_type' => 'expense',
+                'account_codes' => ['UTIL'],
+            ],
+            [
+                'name' => 'Hiburan & Kesehatan',
+                'amount' => 900_000,
+                'budget_type' => 'expense',
+                'account_codes' => ['HIBURAN', 'KESEHATAN'],
+            ],
+            [
+                'name' => 'Belanja Bulanan',
+                'amount' => 1_000_000,
+                'budget_type' => 'expense',
+                'account_codes' => ['BELANJA'],
             ],
         ];
 
@@ -56,13 +69,19 @@ class BudgetSeeder extends Seeder
 
             $budget = Budget::firstOrCreate(
                 ['tenant_id' => $tenantId, 'name' => $data['name']],
-                [...$data, 'user_id' => $user->id],
+                [
+                    ...$data,
+                    'user_id' => $user->id,
+                    'period_type' => 'monthly',
+                    'is_recurring' => true,
+                    'starts_at' => $from->toDateString(),
+                    'ends_at' => $to->toDateString(),
+                ],
             );
 
-            $accountIds = collect($accountCodes)
-                ->map(fn (string $code) => $accounts->get($code))
-                ->filter()
-                ->values();
+            $accountIds = Account::query()
+                ->whereIn('code', $accountCodes)
+                ->pluck('id');
 
             $budget->accounts()->syncWithoutDetaching($accountIds);
         }

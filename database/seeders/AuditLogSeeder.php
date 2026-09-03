@@ -16,40 +16,48 @@ class AuditLogSeeder extends Seeder
     public function run(): void
     {
         $tenantId = TenantContext::id();
-        $user = User::first('id');
-        $journal = Journal::first('id');
+        $user = User::query()->where('email', 'test@example.com')->first();
+
+        if (! $user) {
+            return;
+        }
+
+        // The most recent salary journal is a nice anchor for journal audit rows.
+        $journal = Journal::query()
+            ->where('reference', 'like', 'JRN-DEMO-%-GAJI')
+            ->latest('transaction_date')
+            ->first();
 
         $auditLogs = [
             [
                 'action' => 'journal.created',
                 'before' => null,
                 'after' => ['status' => 'posted'],
-                'reason' => 'Initial journal entry recorded',
+                'reason' => 'Gaji bulanan dicatat dari template',
             ],
             [
                 'action' => 'journal.posted',
                 'before' => ['status' => 'draft'],
                 'after' => ['status' => 'posted'],
-                'reason' => 'Journal approved and posted to ledger',
+                'reason' => 'Journal disetujui dan diposting ke ledger',
             ],
             [
                 'action' => 'journal.updated',
-                'before' => ['description' => 'Monthly rent'],
-                'after' => ['description' => 'Monthly rent payment'],
-                'reason' => 'Corrected journal description',
-            ],
-            [
-                'action' => 'journal.archived',
-                'before' => ['status' => 'posted'],
-                'after' => ['status' => 'archived'],
-                'reason' => 'Historical entry archived after reconciliation',
+                'before' => ['description' => 'Penerimaan gaji'],
+                'after' => ['description' => 'Gaji bulan ini'],
+                'reason' => 'Perbaikan deskripsi journal',
             ],
         ];
 
         foreach ($auditLogs as $logData) {
             AuditLog::firstOrCreate(
-                ['tenant_id' => $tenantId, 'user_id' => $user->id, 'action' => $logData['action']],
-                [...$logData, 'user_id' => $user->id, 'journal_id' => $journal?->id],
+                [
+                    'tenant_id' => $tenantId,
+                    'user_id' => $user->id,
+                    'action' => $logData['action'],
+                    'reason' => $logData['reason'],
+                ],
+                [...$logData, 'journal_id' => $journal?->id],
             );
         }
     }

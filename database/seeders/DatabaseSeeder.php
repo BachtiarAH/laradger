@@ -48,6 +48,8 @@ class DatabaseSeeder extends Seeder
                 JournalTagSeeder::class,
                 AuditLogSeeder::class,
                 BudgetSeeder::class,
+                AllocationSeeder::class,
+                JournalTemplateSeeder::class,
             ]);
         } finally {
             TenantContext::forget();
