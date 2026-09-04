@@ -11,11 +11,13 @@ use App\Models\Account;
 use App\Models\JournalLine;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
+use Throwable;
 
 class AccountController extends Controller
 {
@@ -86,7 +88,12 @@ class AccountController extends Controller
     {
         $this->authorize('create', Account::class);
 
-        $account = Account::create($request->validated());
+        $account = retry(
+            times: 3,
+            callback: fn () => DB::transaction(fn () => Account::create($request->validated())),
+            sleepMilliseconds: 50,
+            when: fn (Throwable $e) => $e instanceof UniqueConstraintViolationException,
+        );
         $account->setAttribute('depth', 0);
 
         return (new AccountResource($account->load('parent')))
