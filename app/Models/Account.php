@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Tenancy\TenantContext;
 use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -42,9 +43,13 @@ class Account extends Model
 
     public static function generateCode(string $type): string
     {
-        $next = Account::query()
-            ->where('type', $type)
-            ->get()
+        $query = Account::query()->where('type', $type);
+
+        if (TenantContext::hasTenant()) {
+            $query->where('tenant_id', TenantContext::id());
+        }
+
+        $next = $query->get()
             ->pluck('code')
             ->map(fn (string $code) => (int) substr($code, -4))
             ->max() ?? 0;

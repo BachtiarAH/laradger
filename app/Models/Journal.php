@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Database\Factories\JournalFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -44,10 +45,15 @@ class Journal extends Model
     {
         $year = $transactionDate?->year ?? now()->year;
 
-        $max = static::query()
+        $query = static::query()
             ->whereYear('transaction_date', $year)
-            ->where('reference', 'like', "JRN-{$year}-%")
-            ->max('reference');
+            ->where('reference', 'like', "JRN-{$year}-%");
+
+        if (TenantContext::hasTenant()) {
+            $query->where('tenant_id', TenantContext::id());
+        }
+
+        $max = $query->max('reference');
 
         $sequence = $max ? ((int) substr($max, (int) strrpos($max, '-') + 1)) + 1 : 1;
 
