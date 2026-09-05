@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class JournalLine extends Model
 {
@@ -19,6 +20,19 @@ class JournalLine extends Model
         static::addGlobalScope('tenant', function (Builder $builder): void {
             if (TenantContext::hasTenant()) {
                 $builder->whereHas('journal', fn ($query) => $query->where('tenant_id', TenantContext::id()));
+            }
+        });
+
+        static::saving(function (JournalLine $line): void {
+            if ($line->account_id) {
+                $account = Account::withoutGlobalScopes()->whereKey($line->account_id)->first();
+                if ($account && (bool) $account->is_header) {
+                    $name = $account->name ?: $account->code;
+                    $msg = 'Akun "'.$name.'" adalah akun induk — tidak bisa dipakai transaksi.';
+                    throw ValidationException::withMessages([
+                        'account_id' => $msg,
+                    ]);
+                }
             }
         });
     }

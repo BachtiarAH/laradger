@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Rules\BalancedJournalLines;
+use App\Rules\LeafAccount;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -34,12 +35,21 @@ class UpdateJournalRequest extends FormRequest
             'status' => ['required', Rule::in(['draft', 'posted', 'archived'])],
             'source' => ['required', Rule::in(['manual', 'imported'])],
             'lines' => ['nullable', 'array', 'min:1', new BalancedJournalLines],
-            'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
+            'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id()), new LeafAccount],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],
             'lines.*.credit' => ['nullable', 'numeric', 'min:0'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
             'tags' => ['nullable', 'array'],
             'tags.*' => ['uuid', Rule::exists('tags', 'id')->where('tenant_id', TenantContext::id())],
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'lines.*.account_id' => 'akun',
+            'lines.*.debit' => 'debit',
+            'lines.*.credit' => 'kredit',
         ];
     }
 }

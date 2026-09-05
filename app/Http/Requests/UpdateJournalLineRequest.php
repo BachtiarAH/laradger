@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\LeafAccount;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -26,10 +27,18 @@ class UpdateJournalLineRequest extends FormRequest
     {
         return [
             'journal_id' => ['sometimes', 'uuid', Rule::exists('journals', 'id')->where('tenant_id', TenantContext::id())],
-            'account_id' => ['sometimes', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
+            'account_id' => ['sometimes', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id()), new LeafAccount],
             'debit' => ['required_without:credit', 'nullable', 'numeric', 'min:0'],
             'credit' => ['required_without:debit', 'nullable', 'numeric', 'min:0'],
             'description' => ['nullable', 'string', 'max:255'],
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'account_id' => 'akun',
+            'journal_id' => 'jurnal',
         ];
     }
 }

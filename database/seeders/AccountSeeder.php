@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Account;
 use App\Tenancy\TenantContext;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 class AccountSeeder extends Seeder
 {
@@ -172,6 +173,24 @@ class AccountSeeder extends Seeder
                     ->where('tenant_id', $tenantId)
                     ->update(['parent_id' => $accountMap[$parentCode]]);
             }
+        }
+
+        // Third pass: mark all parents as header (is_header=true). Use query builder to
+        // avoid triggering Eloquent events that would reject non-header parents.
+        $parentIds = collect($accounts)
+            ->map(fn (array $data) => $this->getParentCode($data['code']))
+            ->filter()
+            ->filter(fn (string $code) => isset($accountMap[$code]))
+            ->map(fn (string $code) => $accountMap[$code])
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($parentIds !== []) {
+            DB::table('accounts')
+                ->whereIn('id', $parentIds)
+                ->where('tenant_id', $tenantId)
+                ->update(['is_header' => true]);
         }
     }
 

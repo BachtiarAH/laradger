@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\Journal;
 use App\Rules\BalancedJournalLines;
+use App\Rules\LeafAccount;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -34,7 +35,7 @@ class StoreJournalRequest extends FormRequest
             'source' => ['required', Rule::in(['manual', 'imported'])],
             'ai_record_id' => ['nullable', 'uuid'],
             'lines' => ['required', 'array', 'min:1', new BalancedJournalLines],
-            'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
+            'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id()), new LeafAccount],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],
             'lines.*.credit' => ['nullable', 'numeric', 'min:0'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
@@ -45,6 +46,15 @@ class StoreJournalRequest extends FormRequest
             'allocation_adjustments.*.allocation_id' => ['required', 'uuid', Rule::exists('allocations', 'id')->where('tenant_id', TenantContext::id())],
             'allocation_adjustments.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
             'allocation_adjustments.*.amount' => ['required', 'numeric', 'decimal:0,2', 'gt:0'],
+        ];
+    }
+
+    public function attributes(): array
+    {
+        return [
+            'lines.*.account_id' => 'akun',
+            'lines.*.debit' => 'debit',
+            'lines.*.credit' => 'kredit',
         ];
     }
 }

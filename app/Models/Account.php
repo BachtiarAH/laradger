@@ -8,6 +8,7 @@ use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class Account extends Model
 {
@@ -27,10 +28,18 @@ class Account extends Model
         'code',
         'name',
         'type',
+        'is_header',
         'parent_id',
         'currency',
         'status',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_header' => 'boolean',
+        ];
+    }
 
     protected static function booted(): void
     {
@@ -39,6 +48,74 @@ class Account extends Model
                 $account->code = self::generateCode($account->type);
             }
         });
+
+        static::saving(function (Account $account): void {
+            // Normalize default.
+            if (! array_key_exists('is_header', $account->getAttributes()) || $account->is_header === null) {
+                $account->is_header = false;
+            }
+
+            $isHeader = (bool) $account->is_header;
+
+            // Header accounts must not have journal lines; leaf accounts must not have children.
+            if ($account->exists) {
+                if ($isHeader && $account->journalLines()->exists()) {
+                    throw ValidationException::withMessages([
+                        'is_header' => 'Akun ini sudah memiliki transaksi dan tidak bisa diubah menjadi akun induk. Pindahkan transaksi ke sub-akun terlebih dahulu.',
+                    ]);
+                }
+
+                if (! $isHeader && $account->children()->exists()) {
+                    throw ValidationException::withMessages([
+                        'is_header' => 'Akun ini memiliki sub-akun dan tidak bisa diubah menjadi akun detail. Hapus atau pindahkan sub-akun terlebih dahulu.',
+                    ]);
+                }
+            }
+
+            // If a parent is set, the parent must be a header and must not have journal lines.
+            if ($account->parent_id) {
+                // Avoid self-reference.
+                if ($account->exists && $account->parent_id === $account->id) {
+                    throw ValidationException::withMessages([
+                        'parent_id' => 'An account cannot be its own parent.',
+                    ]);
+                }
+
+                $parent = self::withoutGlobalScopes()->whereKey($account->parent_id)->first();
+
+                if ($parent) {
+                    if ($account->tenant_id && $parent->tenant_id !== $account->tenant_id) {
+                        throw ValidationException::withMessages([
+                            'parent_id' => 'Parent account must belong to the same tenant.',
+                        ]);
+                    }
+
+                    if (! $parent->is_header) {
+                        $name = $parent->name ?: $parent->code;
+                        throw ValidationException::withMessages([
+                            'parent_id' => 'Akun induk "'.$name.'" harus bertipe kategori. Ubah akun tersebut menjadi akun induk terlebih dahulu.',
+                        ]);
+                    }
+
+                    if ($parent->journalLines()->exists()) {
+                        $name = $parent->name ?: $parent->code;
+                        throw ValidationException::withMessages([
+                            'parent_id' => 'Akun induk "'.$name.'" sudah memiliki transaksi dan tidak bisa memiliki sub-akun.',
+                        ]);
+                    }
+                }
+            }
+        });
+    }
+
+    public function isHeader(): bool
+    {
+        return (bool) $this->is_header;
+    }
+
+    public function isLeaf(): bool
+    {
+        return ! $this->isHeader();
     }
 
     public static function generateCode(string $type): string

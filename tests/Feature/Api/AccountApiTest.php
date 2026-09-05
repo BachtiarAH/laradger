@@ -156,7 +156,7 @@ test('creating an account validates required fields', function () {
 });
 
 test('an account can be shown with parent and children', function () {
-    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1000', 'name' => 'Assets', 'type' => 'asset']);
+    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1000', 'name' => 'Assets', 'type' => 'asset', 'is_header' => true]);
     $child = Account::factory()->create([
         'tenant_id' => $this->tenant->id,
         'code' => '1100',
@@ -202,7 +202,7 @@ test('an account with journal lines cannot be deleted and returns a conflict', f
 });
 
 test('accounts are sorted hierarchically with depth information', function () {
-    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1000', 'name' => 'Assets', 'type' => 'asset']);
+    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1000', 'name' => 'Assets', 'type' => 'asset', 'is_header' => true]);
     $child1 = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1100', 'name' => 'Cash', 'type' => 'asset', 'parent_id' => $parent->id]);
     $child2 = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '1200', 'name' => 'Bank', 'type' => 'asset', 'parent_id' => $parent->id]);
     $unrelated = Account::factory()->create(['tenant_id' => $this->tenant->id, 'code' => '2000', 'name' => 'Liabilities', 'type' => 'liability']);

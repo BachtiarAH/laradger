@@ -23,6 +23,7 @@ class AccountFactory extends Factory
             'code' => $this->faker->unique()->bothify('ACC-###??'),
             'name' => $this->faker->word(),
             'type' => $this->faker->randomElement(['asset', 'liability', 'equity', 'income', 'expense']),
+            'is_header' => false,
             'parent_id' => null,
             'currency' => 'IDR',
             'status' => $this->faker->randomElement(['active', 'inactive']),

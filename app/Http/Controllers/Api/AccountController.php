@@ -26,6 +26,7 @@ class AccountController extends Controller
         $this->authorize('viewAny', Account::class);
 
         $query = Account::with('parent')
+            ->withCount('children')
             ->withSum('journalLines as total_debit', 'debit')
             ->withSum('journalLines as total_credit', 'credit')
             ->when(request('type'), fn ($query) => $query->where('type', request('type')))
