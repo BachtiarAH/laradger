@@ -87,12 +87,12 @@ test('a journal template can be updated', function () {
         ->assertJsonPath('data.period_type', 'weekly');
 });
 
-test('a journal template can be deleted', function () {
+test('a journal template can be archived (soft-deleted)', function () {
     $template = JournalTemplate::factory()->create(['tenant_id' => $this->tenant->id]);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journal-templates/{$template->id}")->assertNoContent();
 
-    expect(JournalTemplate::withoutGlobalScopes()->find($template->id))->toBeNull();
+    expect(JournalTemplate::withoutGlobalScopes()->find($template->id)->trashed())->toBeTrue();
 });
 
 test('generating from a template creates a draft journal with default amounts', function () {

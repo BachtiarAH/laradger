@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AllocationController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
+use App\Http\Controllers\Api\GoalController;
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
 use App\Http\Controllers\Api\JournalTagController;
@@ -68,6 +69,9 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('allocations', AllocationController::class);
         Route::post('allocations/{allocation}/allocate', [AllocationController::class, 'allocate']);
         Route::post('allocations/{allocation}/release', [AllocationController::class, 'release']);
+        Route::post('allocations/{allocation}/complete', [AllocationController::class, 'complete']);
+        Route::post('allocations/{allocation}/cancel', [AllocationController::class, 'cancel']);
+        Route::apiResource('goals', GoalController::class);
         Route::apiResource('journals', JournalController::class);
         Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);
         Route::post('journals/{journal}/reverse', [JournalController::class, 'reverse']);

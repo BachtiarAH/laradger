@@ -37,6 +37,8 @@ class UpdateJournalRequest extends FormRequest
             // template-generated journals are created with source='system' as
             // drafts and must remain editable — the UI echoes the source back.
             'source' => ['required', Rule::in(['manual', 'imported', 'system'])],
+            'allocation_id' => ['nullable', 'uuid', Rule::exists('allocations', 'id')->where('tenant_id', TenantContext::id())],
+            'goal_id' => ['nullable', 'uuid', Rule::exists('goals', 'id')->where('tenant_id', TenantContext::id())],
             'lines' => ['nullable', 'array', 'min:1', new BalancedJournalLines],
             'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id()), new LeafAccount],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],

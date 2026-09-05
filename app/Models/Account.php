@@ -8,12 +8,13 @@ use Database\Factories\AccountFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Validation\ValidationException;
 
 class Account extends Model
 {
     /** @use HasFactory<AccountFactory> */
-    use BelongsToTenant, HasFactory, HasUuids;
+    use BelongsToTenant, HasFactory, HasUuids, SoftDeletes;
 
     public const TYPE_CODE_PREFIXES = [
         'asset' => 'AS',
@@ -121,7 +122,9 @@ class Account extends Model
 
     public static function generateCode(string $type): string
     {
-        $query = Account::query()->where('type', $type);
+        // Archived accounts keep their code in the DB, so the next free code is
+        // computed across deleted rows too to avoid a unique-index collision.
+        $query = Account::query()->withTrashed()->where('type', $type);
 
         if (TenantContext::hasTenant()) {
             $query->where('tenant_id', TenantContext::id());

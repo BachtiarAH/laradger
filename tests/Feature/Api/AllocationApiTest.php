@@ -115,15 +115,15 @@ test('an allocation can be updated and audited', function () {
     ]);
 });
 
-test('an allocation can be deleted and releases all its reservations', function () {
+test('an allocation can be archived (soft-deleted) with its reservations kept', function () {
     $account = allocationAccountWithPostedBalance($this->tenant, 5000000);
     $allocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Vacation']);
     reserveAllocationOn($allocation, $account, 2000000);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/allocations/{$allocation->id}")->assertNoContent();
 
-    $this->assertDatabaseMissing('allocations', ['id' => $allocation->id]);
-    $this->assertDatabaseMissing('account_allocations', ['allocation_id' => $allocation->id]);
+    expect(Allocation::withoutGlobalScopes()->find($allocation->id)->trashed())->toBeTrue();
+    $this->assertDatabaseHas('account_allocations', ['allocation_id' => $allocation->id]);
     $this->assertDatabaseHas('audit_logs', ['action' => 'allocation.deleted', 'tenant_id' => $this->tenant->id]);
 });
 
@@ -254,15 +254,15 @@ test('release cannot exceed the reserved amount', function () {
         ->assertJsonValidationErrors(['amount']);
 });
 
-test('an account with an allocation cannot be deleted and returns a conflict', function () {
+test('an account with an allocation can be archived (soft-deleted)', function () {
     $account = allocationAccountWithPostedBalance($this->tenant, 5000000);
     $allocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Emergency Fund']);
     reserveAllocationOn($allocation, $account, 2000000);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")
-        ->assertStatus(409);
+        ->assertNoContent();
 
-    expect(Account::withoutGlobalScopes()->find($account->id))->not->toBeNull();
+    expect(Account::withoutGlobalScopes()->find($account->id)->trashed())->toBeTrue();
 });
 
 test('account allocation summary reports allocated and unallocated amounts', function () {

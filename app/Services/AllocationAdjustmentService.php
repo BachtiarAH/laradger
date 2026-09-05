@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AllocationStatus;
 use App\Models\Account;
 use App\Models\Allocation;
 use App\Models\AuditLog;
@@ -17,9 +18,19 @@ class AllocationAdjustmentService
 {
     /**
      * Reserve part of an account's available balance for an allocation.
+     * Only active allocations can receive reservations. Target is aspirational
+     * and may exceed balance; Reserved (pivot amount) is strictly bounded.
      */
     public function allocate(Allocation $allocation, Account $account, float $amount): void
     {
+        $allocationStatus = $allocation->status instanceof AllocationStatus ? $allocation->status->value : ($allocation->status ?? 'active');
+
+        if ($allocationStatus !== 'active') {
+            throw ValidationException::withMessages([
+                'allocation_id' => 'Only active allocations can receive reservations. Current status: '.$allocationStatus.'.',
+            ]);
+        }
+
         $account = Account::query()
             ->whereKey($account->id)
             ->lockForUpdate()

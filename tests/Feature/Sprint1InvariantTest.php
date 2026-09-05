@@ -338,7 +338,7 @@ test('posted lock: draft journal can be updated and deleted', function () {
     ])->assertOk();
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertNoContent();
-    expect(Journal::withoutGlobalScopes()->find($journal->id))->toBeNull();
+    expect(Journal::withoutGlobalScopes()->find($journal->id)->trashed())->toBeTrue();
 });
 
 test('posted lock: posted journal cannot be updated or deleted', function () {
@@ -395,8 +395,8 @@ test('posted lock: draft journal with lines can be deleted and cascades', functi
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertNoContent();
 
-    expect(Journal::withoutGlobalScopes()->find($journal->id))->toBeNull();
-    expect(JournalLine::withoutGlobalScopes()->find($line->id))->toBeNull();
+    expect(Journal::withoutGlobalScopes()->find($journal->id)->trashed())->toBeTrue();
+    expect(JournalLine::withoutGlobalScopes()->find($line->id)->trashed())->toBeTrue();
 });
 
 test('posted lock: reversal creates opposite lines and blocks double reversal', function () {

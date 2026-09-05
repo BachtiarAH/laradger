@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-09-05
+
+### Added
+
+- Allocation & Safe Money killer feature (Sprint 3): `Allocation` model with lifecycle status (`Active`, `Completed`, `Cancelled`, `Expired`), `account_allocations` pivot for strict reservations, and `SafeMoneyService` implementing the formula `EA - AA - O` (where `O = 0.0` in V1).
+- `AllocationAdjustmentService` with atomic `allocate`/`release` logic that enforces strict reservation bounds (cannot exceed `postedNetBalance`) and deletes pivot rows at zero.
+- `OverviewController` dashboard rollup exposing `safe_to_spend`, `eligible_assets`, `allocated` (with aspirational `total_target` and `unfunded` gap), `other_obligations`, `is_over_allocated`, and `safe_money_formula`.
+- 6-month wealth history (`wealth_history`) on the overview endpoint.
+- Migration `2026_09_05_044142_add_lifecycle_to_allocations_table` adding `status`, `expires_at`, and `completed_at` to allocations.
+
+### Changed
+
+- Journal posting with allocation adjustments now runs inside a single DB transaction; if allocation validation fails, the entire journal rolls back.
+- `OverviewController` returns money values formatted as strings (`number_format($x, 2, '.', '')`) for consistent client consumption.
+
 ## [0.1.1] - 2026-08-24
 
 ### Added

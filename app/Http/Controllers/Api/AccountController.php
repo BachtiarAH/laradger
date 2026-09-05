@@ -16,7 +16,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Throwable;
 
 class AccountController extends Controller
@@ -125,22 +124,9 @@ class AccountController extends Controller
     {
         $this->authorize('delete', $account);
 
-        if ($account->journalLines()->exists()) {
-            throw new ConflictHttpException('The account cannot be deleted because it has journal lines.');
-        }
-
-        if ($account->allocations()->exists()) {
-            throw new ConflictHttpException('The account cannot be deleted because it has allocations. Release them first.');
-        }
-
-        if ($account->budgets()->exists()) {
-            throw new ConflictHttpException('The account cannot be deleted because it is linked to budgets.');
-        }
-
-        if ($account->children()->exists()) {
-            throw new ConflictHttpException('The account cannot be deleted because it has child accounts.');
-        }
-
+        // Accounts are archived (soft-deleted), never physically removed, so
+        // journal lines, budgets, allocations, templates, and children can keep
+        // referencing the row without foreign-key failures.
         $account->delete();
 
         return response()->json(null, 204);

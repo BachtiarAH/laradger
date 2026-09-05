@@ -3,14 +3,20 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Allocation;
 use App\Models\Budget;
 use App\Models\JournalLine;
+use App\Services\SafeMoneyService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class OverviewController extends Controller
 {
+    public function __construct(
+        private readonly SafeMoneyService $safeMoney,
+    ) {}
+
     public function index(string $tenant, Request $request): JsonResponse
     {
         $period = $request->filled('period') ? $request->string('period')->toString() : 'this_month';
@@ -75,6 +81,16 @@ class OverviewController extends Controller
 
         $netWorth = $assetBalance - $liabilityBalance;
 
+        // Killer feature: Safe Money = Eligible Assets - Active Allocations - Other Obligations (0 in V1)
+        $safeData = $this->safeMoney->calculate();
+        $allocatedBalance = $safeData['allocated'];
+        $otherObligations = $safeData['other_obligations'];
+        $safeToSpend = $safeData['safe'];
+        $isOverAllocated = $safeData['is_over_allocated'];
+
+        // Total target across active allocations (aspirational, may exceed available)
+        $totalTarget = (float) Allocation::active()->sum('target_amount');
+
         // Month-end wealth series (posted + archived only) for the last 6 months.
         $wealthHistory = [];
         for ($i = 5; $i >= 0; $i--) {
@@ -121,6 +137,21 @@ class OverviewController extends Controller
                 'unbudgeted_income' => number_format($unbudgetedIncome, 2, '.', ''),
                 'net_budgeted' => number_format($netBudgeted, 2, '.', ''),
                 'safe_money' => number_format($safeMoney, 2, '.', ''),
+                'safe_to_spend' => number_format($safeToSpend, 2, '.', ''),
+                'safe_money_formula' => 'eligible_assets - active_allocated - goal_commitments - other_obligations',
+                'eligible_assets' => number_format($safeData['eligible_assets'], 2, '.', ''),
+                'allocated' => [
+                    'total_allocated' => number_format($allocatedBalance, 2, '.', ''),
+                    'total_target' => number_format($totalTarget, 2, '.', ''),
+                    'unfunded' => number_format(max(0.0, $totalTarget - $allocatedBalance), 2, '.', ''),
+                ],
+                'goal_commitments' => [
+                    'total' => number_format($safeData['goal_commitments'], 2, '.', ''),
+                    'pending_contributions' => number_format($safeData['pending_goal_contributions'], 2, '.', ''),
+                    'accumulated_savings' => number_format($safeData['accumulated_goal_savings'], 2, '.', ''),
+                ],
+                'other_obligations' => number_format($otherObligations, 2, '.', ''),
+                'is_over_allocated' => $isOverAllocated,
                 'assets' => [
                     'balance' => number_format($assetBalance, 2, '.', ''),
                 ],

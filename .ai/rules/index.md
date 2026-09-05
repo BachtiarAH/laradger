@@ -1,13 +1,11 @@
-# Project Rules Index
+# AI Rules Index
 
-Before planning or editing, find the row whose globs match the file's path and read that rule file.
+Maps file globs to their load-bearing rule files.
 
-| Applies to | Rule file |
-| --- | --- |
-| app/Services/Ai/** | .ai/rules/ai.md |
-| app/Http/Middleware/** | .ai/rules/middleware.md |
-| app/Http/Controllers/Api/UserAdminController.php, routes/api.php (admin area) | .ai/rules/admin.md |
-| database/migrations/** | .ai/rules/migrations.md |
-| database/** (and destructive artisan db commands) | .ai/rules/database.md |
-| app/Models/** | .ai/rules/models.md |
-| app/Models/JournalTemplate*.php, app/Services/JournalTemplateService.php, app/Console/Commands/ProcessJournalTemplates.php | .ai/rules/journal-templates.md |
+| Glob | Rule file |
+|---|---|
+| `app/Services/SafeMoneyService.php` | `safe-money.md` |
+| `app/Http/Controllers/Api/OverviewController.php` | `safe-money.md` |
+| `app/Services/AllocationAdjustmentService.php` | `safe-money.md` |
+| `app/Models/Allocation.php` | `safe-money.md` |
+| `app/Enums/AllocationStatus.php` | `safe-money.md` |

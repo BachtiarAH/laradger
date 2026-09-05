@@ -22,6 +22,8 @@ class StoreTransactionRequest extends FormRequest
             'transaction_date' => ['sometimes', 'date'],
             'reference' => ['nullable', 'string', 'max:255', Rule::unique('journals', 'reference')->where('tenant_id', TenantContext::id())],
             'status' => ['sometimes', Rule::in(['draft', 'posted'])],
+            'allocation_id' => ['nullable', 'uuid', Rule::exists('allocations', 'id')->where('tenant_id', TenantContext::id())],
+            'goal_id' => ['nullable', 'uuid', Rule::exists('goals', 'id')->where('tenant_id', TenantContext::id())],
             'tags' => ['nullable', 'array'],
             'tags.*' => ['uuid', Rule::exists('tags', 'id')->where('tenant_id', TenantContext::id())],
 

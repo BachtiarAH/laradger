@@ -34,9 +34,11 @@ class JournalController extends Controller
         $journals = Journal::withCount('lines')
             ->withSum('lines', 'debit')
             ->withSum('lines', 'credit')
-            ->with('tags')
+            ->with(['tags', 'allocation', 'goal'])
             ->when(request('status'), fn ($query) => $query->where('status', request('status')))
             ->when(request('source'), fn ($query) => $query->where('source', request('source')))
+            ->when(request('allocation_id'), fn ($query) => $query->where('allocation_id', request('allocation_id')))
+            ->when(request('goal_id'), fn ($query) => $query->where('goal_id', request('goal_id')))
             ->when(request('from'), fn ($query) => $query->whereDate('transaction_date', '>=', request('from')))
             ->when(request('to'), fn ($query) => $query->whereDate('transaction_date', '<=', request('to')))
             ->latest('transaction_date')
@@ -72,7 +74,7 @@ class JournalController extends Controller
             when: fn (Throwable $e) => $e instanceof UniqueConstraintViolationException,
         );
 
-        return (new JournalResource($journal->load('lines.account', 'tags')))
+        return (new JournalResource($journal->load('lines.account', 'tags', 'allocation', 'goal')))
             ->response()
             ->setStatusCode(201);
     }
@@ -122,7 +124,7 @@ class JournalController extends Controller
     {
         $this->authorize('view', $journal);
 
-        return new JournalResource($journal->load('lines.account', 'tags'));
+        return new JournalResource($journal->load('lines.account', 'tags', 'allocation', 'goal'));
     }
 
     public function update(string $tenant, UpdateJournalRequest $request, Journal $journal): JournalResource
@@ -134,7 +136,7 @@ class JournalController extends Controller
             // immutability guards (JournalLine::deleting) do not block the
             // draft → posted transition that replaces lines atomically.
             if ($request->has('lines')) {
-                $journal->lines()->delete();
+                $journal->lines()->get()->each->delete();
                 foreach ($request->validated('lines', []) as $index => $line) {
                     $journal->lines()->create($line + ['line_number' => $index + 1]);
                 }
@@ -147,7 +149,7 @@ class JournalController extends Controller
             $journal->update($request->safe()->except(['lines', 'tags']));
         });
 
-        return new JournalResource($journal->fresh('lines.account', 'tags'));
+        return new JournalResource($journal->fresh('lines.account', 'tags', 'allocation', 'goal'));
     }
 
     public function destroy(string $tenant, Journal $journal): JsonResponse
@@ -163,10 +165,10 @@ class JournalController extends Controller
         }
 
         DB::transaction(function () use ($journal): void {
-            // Draft journals are fully mutable: deleting the journal cascades
-            // to its draft lines/tags so the user does not need to delete
-            // lines one-by-one before deleting the journal.
-            $journal->lines()->delete();
+            // Draft journals are fully mutable: archiving the journal also
+            // archives its draft lines (soft delete) so no rows are physically
+            // removed anywhere.
+            $journal->lines()->get()->each->delete();
             $journal->tags()->detach();
             $journal->delete();
         });
@@ -212,7 +214,7 @@ class JournalController extends Controller
             when: fn (Throwable $e) => $e instanceof UniqueConstraintViolationException,
         );
 
-        return (new JournalResource($reversal->load('lines.account', 'tags')))
+        return (new JournalResource($reversal->load('lines.account', 'tags', 'allocation', 'goal')))
             ->response()
             ->setStatusCode(201);
     }

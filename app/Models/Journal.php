@@ -9,16 +9,19 @@ use Database\Factories\JournalFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Validation\ValidationException;
 
 class Journal extends Model
 {
     /** @use HasFactory<JournalFactory> */
-    use BelongsToTenant, HasFactory, HasUuids;
+    use BelongsToTenant, HasFactory, HasUuids, SoftDeletes;
 
     protected $fillable = [
         'tenant_id',
         'reverse_from_id',
+        'allocation_id',
+        'goal_id',
         'transaction_date',
         'description',
         'reference',
@@ -76,7 +79,9 @@ class Journal extends Model
     {
         $year = $transactionDate?->year ?? now()->year;
 
-        $query = static::query()
+        // Archived journals keep their reference in the DB, so the next
+        // sequence number is computed across deleted rows to avoid collisions.
+        $query = static::query()->withTrashed()
             ->whereYear('transaction_date', $year)
             ->where('reference', 'like', "JRN-{$year}-%");
 
@@ -114,5 +119,15 @@ class Journal extends Model
     public function tags()
     {
         return $this->belongsToMany(Tag::class, 'journal_tags')->withTimestamps();
+    }
+
+    public function allocation()
+    {
+        return $this->belongsTo(Allocation::class);
+    }
+
+    public function goal()
+    {
+        return $this->belongsTo(Goal::class);
     }
 }

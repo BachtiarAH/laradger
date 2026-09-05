@@ -78,7 +78,7 @@ class JournalTemplateController extends Controller
             $journalTemplate->update($data);
 
             if ($request->has('lines')) {
-                $journalTemplate->lines()->delete();
+                $journalTemplate->lines()->get()->each->delete();
                 foreach ($request->validated('lines', []) as $index => $line) {
                     $journalTemplate->lines()->create($line + ['line_number' => $index + 1]);
                 }
@@ -96,7 +96,12 @@ class JournalTemplateController extends Controller
     {
         $this->authorize('delete', $journalTemplate);
 
-        $journalTemplate->delete();
+        DB::transaction(function () use ($journalTemplate): void {
+            // Archive the template's lines together with the template so no
+            // rows are physically removed.
+            $journalTemplate->lines()->get()->each->delete();
+            $journalTemplate->delete();
+        });
 
         return response()->json(null, 204);
     }

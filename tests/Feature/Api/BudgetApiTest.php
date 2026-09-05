@@ -90,12 +90,12 @@ test('a budget cannot be accessed by another user', function () {
     $this->getJson("/api/v1/{$this->tenant->slug}/budgets/{$budget->id}")->assertNotFound();
 });
 
-test('a budget can be deleted', function () {
+test('a budget can be archived (soft-deleted)', function () {
     $budget = Budget::factory()->create(['tenant_id' => $this->tenant->id, 'user_id' => $this->user->id]);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/budgets/{$budget->id}")->assertNoContent();
 
-    $this->assertDatabaseMissing('budgets', ['id' => $budget->id]);
+    expect(Budget::withoutGlobalScopes()->find($budget->id)->trashed())->toBeTrue();
 });
 
 test('a budget can be created without a budget type', function () {

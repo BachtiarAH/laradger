@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\AllocationStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -14,14 +15,33 @@ class AllocationResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $status = $this->status instanceof AllocationStatus ? $this->status->value : ($this->status ?? 'active');
+        $totalAllocated = $this->totalAllocatedValue();
+
         return [
             'id' => $this->id,
             'name' => $this->name,
             'description' => $this->description,
             'target_amount' => $this->target_amount !== null ? number_format((float) $this->target_amount, 2, '.', '') : null,
+            'type' => $this->type ?? 'recurring',
+            'period_type' => $this->period_type ?? 'monthly',
+            'starts_at' => $this->starts_at?->toDateString(),
+            'ends_at' => $this->ends_at?->toDateString(),
+            'roll_forward_mode' => $this->roll_forward_mode ?? 'reset',
+            'carry_over_amount' => number_format((float) ($this->carry_over_amount ?? 0), 2, '.', ''),
+            'realized_amount' => number_format($this->realizedAmount(), 2, '.', ''),
+            'remaining_amount' => number_format($this->remainingAmount(), 2, '.', ''),
+            'progress_percent' => $this->progressPercent(),
+            'status' => $status,
+            'expires_at' => $this->expires_at?->toIso8601String(),
+            'completed_at' => $this->completed_at?->toIso8601String(),
             'total_allocated' => $this->when(
-                $this->totalAllocatedValue() !== null,
-                number_format((float) $this->totalAllocatedValue(), 2, '.', ''),
+                $totalAllocated !== null,
+                number_format((float) $totalAllocated, 2, '.', ''),
+            ),
+            'unfunded_amount' => $this->when(
+                $this->target_amount !== null && $totalAllocated !== null,
+                number_format(max(0.0, (float) $this->target_amount - (float) $totalAllocated), 2, '.', ''),
             ),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

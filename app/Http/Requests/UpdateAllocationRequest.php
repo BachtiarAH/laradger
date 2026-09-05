@@ -30,6 +30,14 @@ class UpdateAllocationRequest extends FormRequest
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'target_amount' => ['sometimes', 'nullable', 'numeric', 'decimal:0,2', 'gte:0'],
+            'type' => ['sometimes', 'string', 'in:recurring,one_time'],
+            'period_type' => ['sometimes', 'string', 'in:weekly,monthly,yearly,custom'],
+            'starts_at' => ['sometimes', 'nullable', 'date'],
+            'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
+            'roll_forward_mode' => ['sometimes', 'string', 'in:carry_over,release,reset'],
+            'carry_over_amount' => ['sometimes', 'numeric', 'gte:0'],
+            'status' => ['sometimes', 'string', 'in:active,upcoming,fulfilled,skipped,completed,cancelled,expired'],
+            'expires_at' => ['sometimes', 'nullable', 'date'],
         ];
     }
 }

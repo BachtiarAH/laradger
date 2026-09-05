@@ -2,6 +2,7 @@
 
 use App\Models\Account;
 use App\Models\Journal;
+use App\Models\JournalTemplate;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
 
@@ -182,23 +183,38 @@ test('an account can be updated', function () {
     ])->assertOk()->assertJsonPath('data.name', 'Updated Name');
 });
 
-test('an account can be deleted', function () {
+test('an account can be archived (soft-deleted)', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")->assertNoContent();
 
-    $this->assertDatabaseMissing('accounts', ['id' => $account->id]);
+    $archived = Account::withoutGlobalScopes()->find($account->id);
+    expect($archived)->not->toBeNull();
+    expect($archived->trashed())->toBeTrue();
 });
 
-test('an account with journal lines cannot be deleted and returns a conflict', function () {
+test('an account with journal lines can be archived without a foreign-key failure', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
     $journal->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")
-        ->assertStatus(409);
+        ->assertNoContent();
 
-    expect(Account::withoutGlobalScopes()->find($account->id))->not->toBeNull();
+    $archived = Account::withoutGlobalScopes()->find($account->id);
+    expect($archived)->not->toBeNull();
+    expect($archived->trashed())->toBeTrue();
+});
+
+test('an account used by a journal template line can be archived without a foreign-key failure', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $template = JournalTemplate::factory()->create(['tenant_id' => $this->tenant->id, 'period_type' => 'daily']);
+    $template->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
+
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")->assertNoContent();
+
+    expect(Account::withoutGlobalScopes()->find($account->id)->trashed())->toBeTrue();
+    $this->assertDatabaseHas('journal_template_lines', ['account_id' => $account->id]);
 });
 
 test('accounts are sorted hierarchically with depth information', function () {

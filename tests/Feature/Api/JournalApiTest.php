@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\Account;
+use App\Models\Allocation;
+use App\Models\Goal;
 use App\Models\Journal;
 use App\Models\JournalLine;
 use App\Models\Tag;
@@ -169,8 +171,8 @@ test('a draft journal with lines can be deleted and cascades to its lines', func
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")
         ->assertNoContent();
 
-    expect(Journal::withoutGlobalScopes()->find($journal->id))->toBeNull();
-    expect(JournalLine::withoutGlobalScopes()->find($line->id))->toBeNull();
+    expect(Journal::withoutGlobalScopes()->find($journal->id)->trashed())->toBeTrue();
+    expect(JournalLine::withoutGlobalScopes()->find($line->id)->trashed())->toBeTrue();
 });
 
 test('a posted journal cannot be updated', function () {
@@ -256,7 +258,7 @@ test('reordering lines on update persists the new account order', function () {
         ->assertJsonPath('data.lines.1.line_number', 2)
         ->assertJsonPath('data.lines.1.description', 'First');
 
-    expect(JournalLine::withoutGlobalScopes()->where('journal_id', $journal->id)->orderBy('line_number')->pluck('description')->all())
+    expect(JournalLine::withoutGlobalScopes()->where('journal_id', $journal->id)->whereNull('deleted_at')->orderBy('line_number')->pluck('description')->all())
         ->toBe(['Second', 'First']);
 });
 
@@ -432,4 +434,54 @@ test('journal creation is rolled back when ai confirmation fails', function () {
     ])->assertStatus(500);
 
     expect(Journal::withoutGlobalScopes()->where('description', 'Rolled back journal')->exists())->toBeFalse();
+});
+
+test('a journal can be created and filtered with allocation and goal', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+    $allocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Food Budget']);
+    $goal = Goal::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Emergency Fund']);
+
+    $res = $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Linked journal',
+        'status' => 'draft',
+        'source' => 'manual',
+        'allocation_id' => $allocation->id,
+        'goal_id' => $goal->id,
+        'lines' => [
+            ['account_id' => $account->id, 'debit' => 500.00],
+            ['account_id' => $account->id, 'credit' => 500.00],
+        ],
+    ])->assertCreated();
+
+    $res->assertJsonPath('data.allocation_id', $allocation->id)
+        ->assertJsonPath('data.goal_id', $goal->id)
+        ->assertJsonPath('data.allocation.name', 'Food Budget')
+        ->assertJsonPath('data.goal.name', 'Emergency Fund');
+
+    $journalId = $res->json('data.id');
+
+    // Filter by allocation_id
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals?allocation_id={$allocation->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $journalId);
+
+    // Filter by goal_id
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals?goal_id={$goal->id}")
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $journalId);
+
+    // Update to remove goal and keep allocation
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journalId}", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Updated linked journal',
+        'status' => 'draft',
+        'source' => 'manual',
+        'allocation_id' => $allocation->id,
+        'goal_id' => null,
+    ])->assertOk()
+        ->assertJsonPath('data.allocation_id', $allocation->id)
+        ->assertJsonPath('data.goal_id', null);
 });

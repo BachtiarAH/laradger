@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\AllocationStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AllocateAllocationRequest;
 use App\Http\Requests\ReleaseAllocationRequest;
@@ -29,6 +30,7 @@ class AllocationController extends Controller
 
         $allocations = Allocation::with('accounts')
             ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
+            ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')->toString()))
             ->orderBy('name')
             ->paginate();
 
@@ -113,6 +115,41 @@ class AllocationController extends Controller
         return new AllocationResource($allocation->fresh('accounts'));
     }
 
+    public function complete(string $tenant, Request $request, Allocation $allocation): AllocationResource
+    {
+        $this->authorize('update', $allocation);
+
+        DB::transaction(function () use ($allocation) {
+            $before = $this->snapshot($allocation);
+            $allocation->update([
+                'status' => AllocationStatus::Completed,
+                'completed_at' => now(),
+            ]);
+            // Release all reservations — completed goals free their reserved money
+            DB::table('account_allocations')->where('allocation_id', $allocation->id)->delete();
+            $this->logAudit($allocation, 'allocation.completed', before: $before, after: $this->snapshot($allocation->fresh('accounts')));
+        });
+
+        return new AllocationResource($allocation->fresh('accounts'));
+    }
+
+    public function cancel(string $tenant, Request $request, Allocation $allocation): AllocationResource
+    {
+        $this->authorize('update', $allocation);
+
+        DB::transaction(function () use ($allocation) {
+            $before = $this->snapshot($allocation);
+            $allocation->update([
+                'status' => AllocationStatus::Cancelled,
+                'completed_at' => now(),
+            ]);
+            DB::table('account_allocations')->where('allocation_id', $allocation->id)->delete();
+            $this->logAudit($allocation, 'allocation.cancelled', before: $before, after: $this->snapshot($allocation->fresh('accounts')));
+        });
+
+        return new AllocationResource($allocation->fresh('accounts'));
+    }
+
     /**
      * @param  array<string, mixed>|null  $before
      * @param  array<string, mixed>|null  $after
@@ -133,11 +170,16 @@ class AllocationController extends Controller
      */
     private function snapshot(Allocation $allocation): array
     {
+        $status = $allocation->status instanceof AllocationStatus ? $allocation->status->value : ($allocation->status ?? 'active');
+
         $snapshot = [
             'id' => $allocation->id,
             'name' => $allocation->name,
             'description' => $allocation->description,
             'target_amount' => $allocation->target_amount !== null ? number_format((float) $allocation->target_amount, 2, '.', '') : null,
+            'status' => $status,
+            'expires_at' => $allocation->expires_at?->toIso8601String(),
+            'completed_at' => $allocation->completed_at?->toIso8601String(),
         ];
 
         if ($allocation->relationLoaded('accounts')) {

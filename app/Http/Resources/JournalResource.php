@@ -22,10 +22,14 @@ class JournalResource extends JsonResource
             'status' => $this->status,
             'source' => $this->source,
             'reverse_from_id' => $this->reverse_from_id,
+            'allocation_id' => $this->allocation_id,
+            'goal_id' => $this->goal_id,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
             'lines' => JournalLineResource::collection($this->whenLoaded('lines')),
             'tags' => TagResource::collection($this->whenLoaded('tags')),
+            'allocation' => $this->whenLoaded('allocation', fn () => new AllocationResource($this->allocation)),
+            'goal' => $this->whenLoaded('goal', fn () => new GoalResource($this->goal)),
         ];
 
         // Line aggregates are only available when the listing query
