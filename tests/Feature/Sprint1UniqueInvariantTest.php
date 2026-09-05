@@ -43,7 +43,7 @@ test('same account code allowed across different tenants', function () {
         'status' => 'active',
     ])->assertCreated()->assertJsonPath('data.code', 'AS-0001');
 
-    expect(Account::where('code', 'AS-0001')->count())->toBe(2);
+    expect(Account::withoutGlobalScopes()->where('code', 'AS-0001')->count())->toBe(2);
 });
 
 test('accounts code unique is enforced at DB level (tenant_id, code)', function () {
@@ -102,7 +102,7 @@ test('same journal reference allowed across different tenants', function () {
         ],
     ])->assertCreated()->assertJsonPath('data.reference', 'JRN-CROSS-001');
 
-    expect(Journal::where('reference', 'JRN-CROSS-001')->count())->toBe(2);
+    expect(Journal::withoutGlobalScopes()->where('reference', 'JRN-CROSS-001')->count())->toBe(2);
 });
 
 test('journals reference unique is enforced at DB level (tenant_id, reference)', function () {

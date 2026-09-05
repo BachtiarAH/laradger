@@ -21,6 +21,11 @@ trait BelongsToTenant
         static::addGlobalScope('tenant', function (Builder $builder): void {
             if (TenantContext::hasTenant()) {
                 $builder->where($builder->getModel()->getTable().'.tenant_id', TenantContext::id());
+            } elseif (TenantContext::isSystemContext()) {
+                // Explicit system context (admin/scheduler) — no tenant filter.
+            } else {
+                // Fail-closed: no tenant context → never match any row (prevents SELECT * leak).
+                $builder->whereRaw('1 = 0');
             }
         });
     }

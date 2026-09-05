@@ -153,8 +153,8 @@ test('a draft journal with lines can be deleted and cascades to its lines', func
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")
         ->assertNoContent();
 
-    expect(Journal::query()->find($journal->id))->toBeNull();
-    expect(JournalLine::query()->find($line->id))->toBeNull();
+    expect(Journal::withoutGlobalScopes()->find($journal->id))->toBeNull();
+    expect(JournalLine::withoutGlobalScopes()->find($line->id))->toBeNull();
 });
 
 test('a posted journal cannot be updated', function () {
@@ -240,7 +240,7 @@ test('reordering lines on update persists the new account order', function () {
         ->assertJsonPath('data.lines.1.line_number', 2)
         ->assertJsonPath('data.lines.1.description', 'First');
 
-    expect(JournalLine::query()->where('journal_id', $journal->id)->orderBy('line_number')->pluck('description')->all())
+    expect(JournalLine::withoutGlobalScopes()->where('journal_id', $journal->id)->orderBy('line_number')->pluck('description')->all())
         ->toBe(['Second', 'First']);
 });
 
@@ -257,7 +257,7 @@ test('a journal can be reversed with opposite lines', function () {
         ->assertJsonPath('data.status', 'posted')
         ->assertJsonCount(2, 'data.lines');
 
-    $reversal = Journal::where('reference', $response->json('data.reference'))->first();
+    $reversal = Journal::withoutGlobalScopes()->where('reference', $response->json('data.reference'))->first();
     $this->assertDatabaseHas('journal_lines', [
         'journal_id' => $reversal->id,
         'debit' => 1000.00,
@@ -286,7 +286,7 @@ test('a journal cannot be reversed twice', function () {
     $this->postJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}/reverse")
         ->assertStatus(409);
 
-    expect($journal->reversals()->count())->toBe(1);
+    expect(Journal::withoutGlobalScopes()->where('reverse_from_id', $journal->id)->count())->toBe(1);
 });
 
 test('clients cannot set reverse_from_id or a system source', function () {
@@ -323,7 +323,7 @@ test('reverse_from_id is ignored when creating a journal', function () {
     ])->assertCreated()
         ->assertJsonPath('data.reverse_from_id', null);
 
-    expect(Journal::query()->find($response->json('data.id'))->reverse_from_id)->toBeNull();
+    expect(Journal::withoutGlobalScopes()->find($response->json('data.id'))->reverse_from_id)->toBeNull();
 });
 
 test('a duplicate reference is rejected', function () {
@@ -359,7 +359,7 @@ test('an unbalanced journal cannot be created', function () {
     ])->assertStatus(422)
         ->assertJsonValidationErrors(['lines']);
 
-    expect(Journal::query()->where('description', 'Unbalanced journal')->exists())->toBeFalse();
+    expect(Journal::withoutGlobalScopes()->where('description', 'Unbalanced journal')->exists())->toBeFalse();
 });
 
 test('an unbalanced journal cannot be updated', function () {
@@ -415,5 +415,5 @@ test('journal creation is rolled back when ai confirmation fails', function () {
         ],
     ])->assertStatus(500);
 
-    expect(Journal::query()->where('description', 'Rolled back journal')->exists())->toBeFalse();
+    expect(Journal::withoutGlobalScopes()->where('description', 'Rolled back journal')->exists())->toBeFalse();
 });

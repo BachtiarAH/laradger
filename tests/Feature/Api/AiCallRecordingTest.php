@@ -188,8 +188,8 @@ test('records a confirmation when a journal is created with ai_record_id', funct
         'statement' => 'Spent $45.50 on groceries with cash',
     ])->json('data.record_id');
 
-    $cash = Account::where('name', 'Cash')->first();
-    $groceries = Account::where('name', 'Groceries')->first();
+    $cash = Account::withoutGlobalScopes()->where('name', 'Cash')->first();
+    $groceries = Account::withoutGlobalScopes()->where('name', 'Groceries')->first();
 
     $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
         'transaction_date' => '2026-08-17',
@@ -207,7 +207,7 @@ test('records a confirmation when a journal is created with ai_record_id', funct
     expect($lines)->toHaveCount(2);
 
     $confirmation = $lines[1];
-    $journal = Journal::latest('created_at')->first();
+    $journal = Journal::withoutGlobalScopes()->latest('created_at')->first();
 
     expect($confirmation['type'])->toBe('confirmation')
         ->and($confirmation['id'])->toBe($recordId)

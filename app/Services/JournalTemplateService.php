@@ -31,37 +31,47 @@ class JournalTemplateService
                 // Ensure the tenant context is set so the Journal inherits tenant_id
                 // and per-tenant reference generation works even when invoked from
                 // the scheduler (no {tenant} route to set context).
+                $previousTenant = TenantContext::current();
                 TenantContext::set(Tenant::findOrFail($template->tenant_id));
 
-                $date = $transactionDate ?? now();
+                try {
 
-                $journal = Journal::create([
-                    'transaction_date' => $date,
-                    'description' => $template->description
-                        ? sprintf('%s — %s', $template->name, $template->description)
-                        : $template->name,
-                    'status' => 'draft',
-                    'source' => 'system',
-                ]);
+                    $date = $transactionDate ?? now();
 
-                $defaultLines = $template->lines()->get();
-                $overrideRows = $lineOverrides ? array_values($lineOverrides) : [];
-
-                foreach ($defaultLines as $index => $line) {
-                    $override = $overrideRows[$index] ?? [];
-
-                    $journal->lines()->create([
-                        'account_id' => $override['account_id'] ?? $line->account_id,
-                        'line_number' => $index + 1,
-                        'debit' => $override['debit'] ?? $line->debit,
-                        'credit' => $override['credit'] ?? $line->credit,
-                        'description' => $override['description'] ?? $line->description,
+                    $journal = Journal::create([
+                        'transaction_date' => $date,
+                        'description' => $template->description
+                            ? sprintf('%s — %s', $template->name, $template->description)
+                            : $template->name,
+                        'status' => 'draft',
+                        'source' => 'system',
                     ]);
+
+                    $defaultLines = $template->lines()->get();
+                    $overrideRows = $lineOverrides ? array_values($lineOverrides) : [];
+
+                    foreach ($defaultLines as $index => $line) {
+                        $override = $overrideRows[$index] ?? [];
+
+                        $journal->lines()->create([
+                            'account_id' => $override['account_id'] ?? $line->account_id,
+                            'line_number' => $index + 1,
+                            'debit' => $override['debit'] ?? $line->debit,
+                            'credit' => $override['credit'] ?? $line->credit,
+                            'description' => $override['description'] ?? $line->description,
+                        ]);
+                    }
+
+                    $journal->tags()->sync($template->tags()->pluck('tags.id'));
+
+                    return $journal;
+                } finally {
+                    if ($previousTenant) {
+                        TenantContext::set($previousTenant);
+                    } else {
+                        TenantContext::forget();
+                    }
                 }
-
-                $journal->tags()->sync($template->tags()->pluck('tags.id'));
-
-                return $journal;
             }),
             sleepMilliseconds: 50,
             when: fn (Throwable $e) => $e instanceof UniqueConstraintViolationException,
@@ -89,18 +99,20 @@ class JournalTemplateService
         $now = $now ?? now();
         $created = collect();
 
-        JournalTemplate::query()
-            ->where('is_active', true)
-            ->where(function ($query) use ($now) {
-                $query->whereNull('next_run_at')
-                    ->orWhereDate('next_run_at', '<=', $now->toDateString());
-            })
-            ->get()
-            ->each(function (JournalTemplate $template) use ($now, $created) {
-                $journal = $this->generate($template, $now);
-                $created->push($journal);
-                $this->advanceSchedule($template, $now);
-            });
+        TenantContext::runInSystemContext(function () use ($now, $created): void {
+            JournalTemplate::query()
+                ->where('is_active', true)
+                ->where(function ($query) use ($now) {
+                    $query->whereNull('next_run_at')
+                        ->orWhereDate('next_run_at', '<=', $now->toDateString());
+                })
+                ->get()
+                ->each(function (JournalTemplate $template) use ($now, $created): void {
+                    $journal = $this->generate($template, $now);
+                    $created->push($journal);
+                    $this->advanceSchedule($template, $now);
+                });
+        });
 
         return $created;
     }

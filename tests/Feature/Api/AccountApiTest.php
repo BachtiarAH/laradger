@@ -198,7 +198,7 @@ test('an account with journal lines cannot be deleted and returns a conflict', f
     $this->deleteJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}")
         ->assertStatus(409);
 
-    expect(Account::query()->find($account->id))->not->toBeNull();
+    expect(Account::withoutGlobalScopes()->find($account->id))->not->toBeNull();
 });
 
 test('accounts are sorted hierarchically with depth information', function () {

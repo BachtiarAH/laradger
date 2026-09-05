@@ -71,7 +71,7 @@ test('an unbalanced journal template cannot be created', function () {
     ])->assertStatus(422)
         ->assertJsonValidationErrors(['lines']);
 
-    expect(JournalTemplate::query()->where('name', 'Bad template')->exists())->toBeFalse();
+    expect(JournalTemplate::withoutGlobalScopes()->where('name', 'Bad template')->exists())->toBeFalse();
 });
 
 test('a journal template can be updated', function () {
@@ -92,7 +92,7 @@ test('a journal template can be deleted', function () {
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journal-templates/{$template->id}")->assertNoContent();
 
-    expect(JournalTemplate::query()->find($template->id))->toBeNull();
+    expect(JournalTemplate::withoutGlobalScopes()->find($template->id))->toBeNull();
 });
 
 test('generating from a template creates a draft journal with default amounts', function () {
@@ -115,8 +115,8 @@ test('generating from a template creates a draft journal with default amounts', 
         ->assertJsonCount(1, 'data.tags')
         ->assertJsonPath('data.description', 'Monthly rent — Rent');
 
-    expect(Journal::query()->where('id', $response->json('data.id'))->count())->toBe(1);
-    expect(JournalTemplate::query()->find($template->id)->last_run_at)->not->toBeNull();
+    expect(Journal::withoutGlobalScopes()->where('id', $response->json('data.id'))->count())->toBe(1);
+    expect(JournalTemplate::withoutGlobalScopes()->find($template->id)->last_run_at)->not->toBeNull();
 });
 
 test('generating from a template allows per-line amount overrides', function () {
@@ -165,9 +165,9 @@ test('the scheduler process command generates journals for due templates only', 
 
     $this->artisan('journal-templates:process')->assertExitCode(0);
 
-    expect(Journal::query()->where('description', 'like', "{$due->name}%")->count())->toBe(1);
-    expect(Journal::query()->where('description', 'like', "{$notDue->name}%")->count())->toBe(0);
-    expect(Journal::query()->where('description', 'like', "{$inactive->name}%")->count())->toBe(0);
+    expect(Journal::withoutGlobalScopes()->where('description', 'like', "{$due->name}%")->count())->toBe(1);
+    expect(Journal::withoutGlobalScopes()->where('description', 'like', "{$notDue->name}%")->count())->toBe(0);
+    expect(Journal::withoutGlobalScopes()->where('description', 'like', "{$inactive->name}%")->count())->toBe(0);
 
     $due->refresh();
     expect($due->last_run_at)->not->toBeNull();
