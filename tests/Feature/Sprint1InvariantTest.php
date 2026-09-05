@@ -235,7 +235,7 @@ test('parent: header account cannot be used as transaction line account', functi
     ])->assertStatus(422);
 });
 
-test('parent: leaf account cannot have children', function () {
+test('parent: adding a child auto-promotes a transaction-free detail account to induk', function () {
     $leaf = Account::factory()->create(['tenant_id' => $this->tenant->id, 'is_header' => false, 'type' => 'asset']);
 
     $this->postJson("/api/v1/{$this->tenant->slug}/accounts", [
@@ -245,11 +245,15 @@ test('parent: leaf account cannot have children', function () {
         'status' => 'active',
         'is_header' => false,
         'parent_id' => $leaf->id,
-    ])->assertStatus(422);
+    ])->assertCreated()->assertJsonPath('data.parent_id', $leaf->id);
+
+    expect(Account::withoutGlobalScopes()->find($leaf->id)->is_header)->toBeTrue();
 });
 
-test('parent: parent must be a header account', function () {
+test('parent: a detail account that already has journal lines cannot become parent', function () {
     $leafParent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'is_header' => false, 'type' => 'asset']);
+    $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $journal->lines()->create(['account_id' => $leafParent->id, 'debit' => 100, 'credit' => 0]);
 
     $this->postJson("/api/v1/{$this->tenant->slug}/accounts", [
         'name' => 'Child with leaf parent',
@@ -258,6 +262,8 @@ test('parent: parent must be a header account', function () {
         'status' => 'active',
         'parent_id' => $leafParent->id,
     ])->assertStatus(422)->assertJsonValidationErrors(['parent_id']);
+
+    expect(Account::withoutGlobalScopes()->find($leafParent->id)->is_header)->toBeFalse();
 });
 
 test('parent: header with existing journal lines cannot become leaf or get children', function () {

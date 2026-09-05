@@ -228,3 +228,17 @@ test('accounts are sorted hierarchically with depth information', function () {
     expect($parentIndex)->toBeLessThan($child1Index);
     expect($parentIndex)->toBeLessThan($child2Index);
 });
+
+test('a sub-account can be added under a fresh detail account and promotes it to induk', function () {
+    $parent = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'is_header' => false]);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/accounts", [
+        'name' => 'Reksa Dana Saham - Mandiri',
+        'type' => 'asset',
+        'currency' => 'IDR',
+        'status' => 'active',
+        'parent_id' => $parent->id,
+    ])->assertCreated()->assertJsonPath('data.parent_id', $parent->id);
+
+    expect(Account::withoutGlobalScopes()->find($parent->id)->is_header)->toBeTrue();
+});

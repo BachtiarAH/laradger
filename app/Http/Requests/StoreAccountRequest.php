@@ -42,11 +42,9 @@ class StoreAccountRequest extends FormRequest
 
                     $parent = Account::withoutGlobalScopes()->whereKey($value)->first();
 
-                    if ($parent && (bool) $parent->is_header === false) {
-                        $name = $parent->name ?: $parent->code;
-                        $fail('Akun induk "'.$name.'" harus bertipe kategori. Ubah akun tersebut menjadi akun induk terlebih dahulu.');
-                    }
-
+                    // A detail account without journal lines is auto-promoted to an induk
+                    // (kategori) when it gains children (see Account::booted), so only
+                    // parents that already carry transactions are rejected here.
                     if ($parent && $parent->journalLines()->exists()) {
                         $name = $parent->name ?: $parent->code;
                         $fail('Akun induk "'.$name.'" sudah memiliki transaksi dan tidak bisa memiliki sub-akun.');

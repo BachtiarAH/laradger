@@ -82,7 +82,6 @@ class Account extends Model
                 }
 
                 $parent = self::withoutGlobalScopes()->whereKey($account->parent_id)->first();
-
                 if ($parent) {
                     if ($account->tenant_id && $parent->tenant_id !== $account->tenant_id) {
                         throw ValidationException::withMessages([
@@ -90,13 +89,15 @@ class Account extends Model
                         ]);
                     }
 
-                    if (! $parent->is_header) {
-                        $name = $parent->name ?: $parent->code;
-                        throw ValidationException::withMessages([
-                            'parent_id' => 'Akun induk "'.$name.'" harus bertipe kategori. Ubah akun tersebut menjadi akun induk terlebih dahulu.',
-                        ]);
+                    // A detail account that has no journal lines yet is promoted to
+                    // an induk (kategori) automatically the moment it gains children,
+                    // so users do not have to flip the header flag manually first.
+                    if (! $parent->is_header && ! $parent->journalLines()->exists()) {
+                        $parent->forceFill(['is_header' => true])->save();
                     }
 
+                    // Parents that already carry journal lines can never be promoted,
+                    // therefore they cannot be given children.
                     if ($parent->journalLines()->exists()) {
                         $name = $parent->name ?: $parent->code;
                         throw ValidationException::withMessages([
