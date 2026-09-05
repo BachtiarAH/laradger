@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\NextReferenceController;
 use App\Http\Controllers\Api\OverviewController;
 use App\Http\Controllers\Api\TagController;
 use App\Http\Controllers\Api\TenantController;
+use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\UserAdminController;
 use Illuminate\Support\Facades\Route;
 use Symfony\Component\Yaml\Yaml;
@@ -77,6 +78,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('tags', TagController::class);
         Route::apiResource('budgets', BudgetController::class);
         Route::apiResource('audit-logs', AuditLogController::class)->only(['index', 'show']);
+        Route::post('transactions', [TransactionController::class, 'store']);
         Route::get('overview', [OverviewController::class, 'index']);
     });
 });
