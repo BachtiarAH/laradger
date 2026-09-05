@@ -9,6 +9,7 @@ use Database\Factories\JournalFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\ValidationException;
 
 class Journal extends Model
 {
@@ -37,6 +38,36 @@ class Journal extends Model
         static::creating(function (Journal $journal) {
             if (blank($journal->reference)) {
                 $journal->reference = static::nextReference($journal->transaction_date);
+            }
+        });
+
+        static::updating(function (Journal $journal) {
+            $originalStatus = $journal->getOriginal('status');
+
+            if ($originalStatus !== 'draft') {
+                throw ValidationException::withMessages([
+                    'status' => 'Posted or archived journals are immutable. Use reversal + correction journal instead.',
+                ]);
+            }
+        });
+
+        static::deleting(function (Journal $journal) {
+            if ($journal->status !== 'draft') {
+                throw ValidationException::withMessages([
+                    'journal' => 'Only draft journals can be deleted.',
+                ]);
+            }
+
+            if ($journal->auditLogs()->exists()) {
+                throw ValidationException::withMessages([
+                    'journal' => 'The journal cannot be deleted because it has audit logs.',
+                ]);
+            }
+
+            if ($journal->reversals()->exists()) {
+                throw ValidationException::withMessages([
+                    'journal' => 'The journal cannot be deleted because it has reversals.',
+                ]);
             }
         });
     }

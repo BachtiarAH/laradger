@@ -24,6 +24,30 @@ class JournalLine extends Model
         });
 
         static::saving(function (JournalLine $line): void {
+            // Immutability: existing lines on posted/archived journals are locked.
+            // Creating lines is allowed so that a posted journal can be created
+            // atomically with its lines; later additions are blocked at the
+            // controller/policy layer (JournalPolicy/JournalLinePolicy → 403).
+            if ($line->exists) {
+                $journal = Journal::withoutGlobalScopes()->find($line->getOriginal('journal_id') ?? $line->journal_id);
+
+                if ($journal && $journal->status !== 'draft') {
+                    throw ValidationException::withMessages([
+                        'journal_id' => 'Lines can only be modified on draft journals. Posted journals are immutable — use reversal instead.',
+                    ]);
+                }
+
+                if ($line->isDirty('account_id') || $line->isDirty('debit') || $line->isDirty('credit') || $line->isDirty('journal_id')) {
+                    $currentJournal = $line->journal_id ? Journal::withoutGlobalScopes()->find($line->journal_id) : $journal;
+
+                    if (($currentJournal && $currentJournal->status !== 'draft') || ($journal && $journal->status !== 'draft')) {
+                        throw ValidationException::withMessages([
+                            'journal_id' => 'Amount, account, and line changes are blocked for posted journals. Use reversal + correction journal.',
+                        ]);
+                    }
+                }
+            }
+
             if ($line->account_id) {
                 $account = Account::withoutGlobalScopes()->whereKey($line->account_id)->first();
                 if ($account && (bool) $account->is_header) {
@@ -33,6 +57,16 @@ class JournalLine extends Model
                         'account_id' => $msg,
                     ]);
                 }
+            }
+        });
+
+        static::deleting(function (JournalLine $line): void {
+            $journal = Journal::withoutGlobalScopes()->find($line->journal_id);
+
+            if ($journal && $journal->status !== 'draft') {
+                throw ValidationException::withMessages([
+                    'journal_id' => 'Lines can only be deleted from draft journals. Posted journals are immutable — use reversal instead.',
+                ]);
             }
         });
     }

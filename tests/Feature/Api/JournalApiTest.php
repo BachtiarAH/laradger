@@ -145,15 +145,16 @@ test('a draft journal can be deleted', function () {
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")->assertNoContent();
 });
 
-test('a draft journal with lines cannot be deleted and returns a conflict', function () {
+test('a draft journal with lines can be deleted and cascades to its lines', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
-    $journal->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
+    $line = $journal->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
 
     $this->deleteJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}")
-        ->assertStatus(409);
+        ->assertNoContent();
 
-    expect(Journal::query()->find($journal->id))->not->toBeNull();
+    expect(Journal::query()->find($journal->id))->toBeNull();
+    expect(JournalLine::query()->find($line->id))->toBeNull();
 });
 
 test('a posted journal cannot be updated', function () {

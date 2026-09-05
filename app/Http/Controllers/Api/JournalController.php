@@ -130,8 +130,9 @@ class JournalController extends Controller
         $this->authorize('update', $journal);
 
         DB::transaction(function () use ($request, $journal) {
-            $journal->update($request->safe()->except(['lines', 'tags']));
-
+            // Handle lines/tags while journal is still draft so model-level
+            // immutability guards (JournalLine::deleting) do not block the
+            // draft → posted transition that replaces lines atomically.
             if ($request->has('lines')) {
                 $journal->lines()->delete();
                 foreach ($request->validated('lines', []) as $index => $line) {
@@ -142,6 +143,8 @@ class JournalController extends Controller
             if ($request->has('tags')) {
                 $journal->tags()->sync($request->validated('tags', []));
             }
+
+            $journal->update($request->safe()->except(['lines', 'tags']));
         });
 
         return new JournalResource($journal->fresh('lines.account', 'tags'));
@@ -151,10 +154,6 @@ class JournalController extends Controller
     {
         $this->authorize('delete', $journal);
 
-        if ($journal->lines()->exists()) {
-            throw new ConflictHttpException('The journal cannot be deleted because it has journal lines.');
-        }
-
         if ($journal->auditLogs()->exists()) {
             throw new ConflictHttpException('The journal cannot be deleted because it has audit logs.');
         }
@@ -163,7 +162,14 @@ class JournalController extends Controller
             throw new ConflictHttpException('The journal cannot be deleted because it has reversals.');
         }
 
-        $journal->delete();
+        DB::transaction(function () use ($journal): void {
+            // Draft journals are fully mutable: deleting the journal cascades
+            // to its draft lines/tags so the user does not need to delete
+            // lines one-by-one before deleting the journal.
+            $journal->lines()->delete();
+            $journal->tags()->detach();
+            $journal->delete();
+        });
 
         return response()->json(null, 204);
     }
