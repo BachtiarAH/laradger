@@ -33,7 +33,10 @@ class UpdateJournalRequest extends FormRequest
             'description' => ['required', 'string', 'max:255'],
             'reference' => ['nullable', 'string', 'max:255', Rule::unique('journals', 'reference')->where('tenant_id', TenantContext::id())->ignore($journal->id)],
             'status' => ['required', Rule::in(['draft', 'posted', 'archived'])],
-            'source' => ['required', Rule::in(['manual', 'imported'])],
+            // 'system' is allowed here (unlike store) because reversals and
+            // template-generated journals are created with source='system' as
+            // drafts and must remain editable — the UI echoes the source back.
+            'source' => ['required', Rule::in(['manual', 'imported', 'system'])],
             'lines' => ['nullable', 'array', 'min:1', new BalancedJournalLines],
             'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id()), new LeafAccount],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],

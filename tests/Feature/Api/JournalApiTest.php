@@ -139,6 +139,22 @@ test('a draft journal can be updated', function () {
     ])->assertOk()->assertJsonPath('data.status', 'posted');
 });
 
+test('a system-sourced draft journal can be updated', function () {
+    $journal = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'status' => 'draft',
+        'source' => 'system',
+    ]);
+
+    $this->putJson("/api/v1/{$this->tenant->slug}/journals/{$journal->id}", [
+        'transaction_date' => '2026-08-01',
+        'description' => 'Updated template journal',
+        'reference' => $journal->reference,
+        'status' => 'posted',
+        'source' => 'system',
+    ])->assertOk()->assertJsonPath('data.status', 'posted');
+});
+
 test('a draft journal can be deleted', function () {
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'draft']);
 
