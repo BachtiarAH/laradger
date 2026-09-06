@@ -69,6 +69,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('allocations', AllocationController::class);
         Route::post('allocations/{allocation}/allocate', [AllocationController::class, 'allocate']);
         Route::post('allocations/{allocation}/release', [AllocationController::class, 'release']);
+        Route::post('allocations/{allocation}/deduct', [AllocationController::class, 'directDeduct']);
         Route::post('allocations/{allocation}/complete', [AllocationController::class, 'complete']);
         Route::post('allocations/{allocation}/cancel', [AllocationController::class, 'cancel']);
         Route::apiResource('goals', GoalController::class);

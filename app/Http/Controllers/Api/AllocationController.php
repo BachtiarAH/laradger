@@ -115,6 +115,32 @@ class AllocationController extends Controller
         return new AllocationResource($allocation->fresh('accounts'));
     }
 
+    public function directDeduct(string $tenant, Request $request, Allocation $allocation): AllocationResource
+    {
+        $this->authorize('update', $allocation);
+
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'gte:0'],
+            'mode' => ['nullable', 'in:add,set'],
+        ]);
+
+        DB::transaction(function () use ($allocation, $data) {
+            $before = $this->snapshot($allocation);
+
+            $currentManual = (float) ($allocation->manual_realized_amount ?? 0);
+            $amount = (float) $data['amount'];
+            $newManual = ($data['mode'] ?? 'add') === 'set' ? $amount : $currentManual + $amount;
+
+            $allocation->update([
+                'manual_realized_amount' => $newManual,
+            ]);
+
+            $this->logAudit($allocation, 'allocation.direct_deducted', before: $before, after: $this->snapshot($allocation->fresh('accounts')));
+        });
+
+        return new AllocationResource($allocation->fresh('accounts'));
+    }
+
     public function complete(string $tenant, Request $request, Allocation $allocation): AllocationResource
     {
         $this->authorize('update', $allocation);

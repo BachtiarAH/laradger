@@ -36,6 +36,7 @@ class UpdateAllocationRequest extends FormRequest
             'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
             'roll_forward_mode' => ['sometimes', 'string', 'in:carry_over,release,reset'],
             'carry_over_amount' => ['sometimes', 'numeric', 'gte:0'],
+            'manual_realized_amount' => ['sometimes', 'nullable', 'numeric', 'gte:0'],
             'status' => ['sometimes', 'string', 'in:active,upcoming,fulfilled,skipped,completed,cancelled,expired'],
             'expires_at' => ['sometimes', 'nullable', 'date'],
         ];

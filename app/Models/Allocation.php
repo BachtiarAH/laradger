@@ -30,6 +30,7 @@ class Allocation extends Model
         'ends_at',
         'roll_forward_mode',
         'carry_over_amount',
+        'manual_realized_amount',
         'status',
         'expires_at',
         'completed_at',
@@ -40,6 +41,7 @@ class Allocation extends Model
         return [
             'target_amount' => 'decimal:2',
             'carry_over_amount' => 'decimal:2',
+            'manual_realized_amount' => 'decimal:2',
             'starts_at' => 'date',
             'ends_at' => 'date',
             'status' => AllocationStatus::class,
@@ -102,9 +104,9 @@ class Allocation extends Model
     }
 
     /**
-     * Actual realized spending across any asset account linked to this allocation.
+     * Realized spending from journal transactions linked to this allocation.
      */
-    public function realizedAmount(?CarbonInterface $start = null, ?CarbonInterface $end = null): float
+    public function journalRealizedAmount(?CarbonInterface $start = null, ?CarbonInterface $end = null): float
     {
         $query = JournalLine::query()
             ->whereHas('journal', function ($q) use ($start, $end) {
@@ -125,6 +127,22 @@ class Allocation extends Model
         $totalCredits = (float) (clone $query)->sum('credit');
 
         return max(0.0, $totalDebits - $totalCredits);
+    }
+
+    /**
+     * Manual direct deduction without transactions.
+     */
+    public function manualRealizedAmount(): float
+    {
+        return (float) ($this->manual_realized_amount ?? 0);
+    }
+
+    /**
+     * Total realized spending across journal transactions and manual direct deductions.
+     */
+    public function realizedAmount(?CarbonInterface $start = null, ?CarbonInterface $end = null): float
+    {
+        return max(0.0, $this->journalRealizedAmount($start, $end) + $this->manualRealizedAmount());
     }
 
     /**

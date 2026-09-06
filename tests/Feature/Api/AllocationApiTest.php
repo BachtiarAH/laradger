@@ -170,6 +170,21 @@ test('allocation cannot exceed the available posted balance', function () {
     $this->assertDatabaseCount('account_allocations', 0);
 });
 
+test('allocating ignores reservations from soft-deleted allocations', function () {
+    $account = allocationAccountWithPostedBalance($this->tenant, 5000000);
+    $oldAllocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Old Fund']);
+    reserveAllocationOn($oldAllocation, $account, 3000000);
+
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/allocations/{$oldAllocation->id}")->assertNoContent();
+
+    $newAllocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'New Fund']);
+    $this->postJson("/api/v1/{$this->tenant->slug}/allocations/{$newAllocation->id}/allocate", [
+        'account_id' => $account->id,
+        'amount' => '4000000.00',
+    ])->assertOk()
+        ->assertJsonPath('data.total_allocated', '4000000.00');
+});
+
 test('draft journal lines do not count towards the available balance', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
     $posted = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);

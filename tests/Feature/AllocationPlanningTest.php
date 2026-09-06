@@ -165,5 +165,100 @@ test('roll forward command rolls forward recurring allocations with carry over m
     $allocation->refresh();
     // 250k - 150k = 100k unspent carried over!
     expect((float) $allocation->carry_over_amount)->toBe(100000.0)
-        ->and($allocation->effectiveTargetAmount())->toBe(350000.0);
+        ->and($allocation->effectiveTargetAmount())->toBe(350000.0)
+        ->and((float) $allocation->manual_realized_amount)->toBe(0.0);
+});
+
+test('allocation supports manual realization without journal transactions', function () {
+    $bri = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'status' => 'active']);
+    $opening = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $opening->lines()->create(['account_id' => $bri->id, 'debit' => 1000000, 'credit' => 0]);
+
+    $allocation = Allocation::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Monthly Vacation Fund',
+        'target_amount' => 500000,
+        'status' => 'active',
+        'manual_realized_amount' => 0,
+    ]);
+
+    $initialJournalCount = Journal::count();
+
+    // 1. Direct deduct with add mode (200k)
+    $res1 = $this->postJson("/api/v1/{$this->tenant->slug}/allocations/{$allocation->id}/deduct", [
+        'amount' => 200000,
+        'mode' => 'add',
+        'reason' => 'Direct cash spending offline',
+    ])->assertOk()->json('data');
+
+    expect($res1['manual_realized_amount'])->toBe('200000.00')
+        ->and($res1['journal_realized_amount'])->toBe('0.00')
+        ->and($res1['realized_amount'])->toBe('200000.00')
+        ->and($res1['remaining_amount'])->toBe('300000.00');
+
+    // 2. Add another 100k
+    $res2 = $this->postJson("/api/v1/{$this->tenant->slug}/allocations/{$allocation->id}/deduct", [
+        'amount' => 100000,
+        'mode' => 'add',
+    ])->assertOk()->json('data');
+
+    expect($res2['manual_realized_amount'])->toBe('300000.00')
+        ->and($res2['remaining_amount'])->toBe('200000.00');
+
+    // 3. Set mode (set to 150k)
+    $res3 = $this->postJson("/api/v1/{$this->tenant->slug}/allocations/{$allocation->id}/deduct", [
+        'amount' => 150000,
+        'mode' => 'set',
+    ])->assertOk()->json('data');
+
+    expect($res3['manual_realized_amount'])->toBe('150000.00')
+        ->and($res3['remaining_amount'])->toBe('350000.00');
+
+    // 4. Verify no journals were created
+    TenantContext::set($this->tenant);
+    expect(Journal::count())->toBe($initialJournalCount);
+
+    // 5. Verify Safe-to-Spend reflects the reduced remaining commitment:
+    // Assets: 1,000,000. Remaining allocation: 350,000 -> Safe-to-Spend: 650,000
+    $overview = $this->getJson("/api/v1/{$this->tenant->slug}/overview")->assertOk()->json('data');
+    expect($overview['eligible_assets'])->toBe('1000000.00')
+        ->and($overview['allocated']['total_allocated'])->toBe('350000.00')
+        ->and($overview['safe_to_spend'])->toBe('650000.00');
+});
+
+test('safe to spend ignores reservations of soft-deleted allocations', function () {
+    $bri = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+
+    $opening = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'transaction_date' => now()->toDateString(),
+        'status' => 'posted',
+    ]);
+    $opening->lines()->create(['account_id' => $bri->id, 'debit' => 5000000, 'credit' => 0]);
+
+    $deletedAllocation = Allocation::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Old Allocation',
+        'target_amount' => 2000000,
+        'status' => 'active',
+    ]);
+    $deletedAllocation->accounts()->attach($bri->id, ['amount' => 2000000]);
+
+    Allocation::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Active Allocation',
+        'target_amount' => 500000,
+        'status' => 'active',
+    ]);
+
+    $resBefore = $this->getJson("/api/v1/{$this->tenant->slug}/overview")->assertOk()->json('data');
+    expect($resBefore['allocated']['total_allocated'])->toBe('2500000.00')
+        ->and($resBefore['safe_to_spend'])->toBe('2500000.00');
+
+    $this->deleteJson("/api/v1/{$this->tenant->slug}/allocations/{$deletedAllocation->id}")->assertNoContent();
+
+    $resAfter = $this->getJson("/api/v1/{$this->tenant->slug}/overview")->assertOk()->json('data');
+    expect($resAfter['allocated']['total_allocated'])->toBe('500000.00')
+        ->and($resAfter['allocated']['total_target'])->toBe('500000.00')
+        ->and($resAfter['safe_to_spend'])->toBe('4500000.00');
 });

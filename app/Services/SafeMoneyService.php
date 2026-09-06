@@ -69,11 +69,14 @@ class SafeMoneyService
         $pivotQuery = DB::table('account_allocations')
             ->join('allocations', 'allocations.id', '=', 'account_allocations.allocation_id')
             ->join('accounts', 'accounts.id', '=', 'account_allocations.account_id')
+            ->whereNull('allocations.deleted_at')
+            ->whereNull('accounts.deleted_at')
             ->where('allocations.status', 'active')
             ->where('accounts.type', 'asset');
 
         if (TenantContext::hasTenant()) {
-            $pivotQuery->where('accounts.tenant_id', TenantContext::id());
+            $pivotQuery->where('accounts.tenant_id', TenantContext::id())
+                ->where('allocations.tenant_id', TenantContext::id());
         }
 
         $pivotTotal = (float) $pivotQuery->sum('account_allocations.amount');

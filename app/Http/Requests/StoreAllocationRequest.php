@@ -32,6 +32,7 @@ class StoreAllocationRequest extends FormRequest
             'starts_at' => ['nullable', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],
             'roll_forward_mode' => ['sometimes', 'string', 'in:carry_over,release,reset'],
+            'manual_realized_amount' => ['sometimes', 'nullable', 'numeric', 'gte:0'],
             'status' => ['sometimes', 'string', 'in:active,upcoming,fulfilled,skipped,completed,cancelled,expired'],
             'expires_at' => ['nullable', 'date'],
         ];

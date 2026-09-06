@@ -49,6 +49,7 @@ class RollForwardAllocationsCommand extends Command
                     'starts_at' => $nextStart,
                     'ends_at' => $nextEnd,
                     'carry_over_amount' => $carryOver,
+                    'manual_realized_amount' => 0.0,
                 ]);
 
                 $count++;

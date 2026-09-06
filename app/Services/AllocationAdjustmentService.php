@@ -49,8 +49,11 @@ class AllocationAdjustmentService
             ->first();
 
         $currentTotal = (float) DB::table('account_allocations')
-            ->where('account_id', $account->id)
-            ->sum('amount');
+            ->join('allocations', 'allocations.id', '=', 'account_allocations.allocation_id')
+            ->whereNull('allocations.deleted_at')
+            ->where('allocations.status', 'active')
+            ->where('account_allocations.account_id', $account->id)
+            ->sum('account_allocations.amount');
 
         $available = max(0.0, $account->postedNetBalance());
 

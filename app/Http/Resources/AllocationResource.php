@@ -29,6 +29,8 @@ class AllocationResource extends JsonResource
             'ends_at' => $this->ends_at?->toDateString(),
             'roll_forward_mode' => $this->roll_forward_mode ?? 'reset',
             'carry_over_amount' => number_format((float) ($this->carry_over_amount ?? 0), 2, '.', ''),
+            'manual_realized_amount' => number_format($this->manualRealizedAmount(), 2, '.', ''),
+            'journal_realized_amount' => number_format($this->journalRealizedAmount(), 2, '.', ''),
             'realized_amount' => number_format($this->realizedAmount(), 2, '.', ''),
             'remaining_amount' => number_format($this->remainingAmount(), 2, '.', ''),
             'progress_percent' => $this->progressPercent(),
