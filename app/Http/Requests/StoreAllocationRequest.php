@@ -3,8 +3,10 @@
 namespace App\Http\Requests;
 
 use App\Models\Allocation;
+use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreAllocationRequest extends FormRequest
 {
@@ -35,6 +37,13 @@ class StoreAllocationRequest extends FormRequest
             'manual_realized_amount' => ['sometimes', 'nullable', 'numeric', 'gte:0'],
             'status' => ['sometimes', 'string', 'in:active,upcoming,fulfilled,skipped,completed,cancelled,expired'],
             'expires_at' => ['nullable', 'date'],
+            'expense_account_ids' => ['sometimes', 'nullable', 'array'],
+            'expense_account_ids.*' => [
+                'uuid',
+                Rule::exists('accounts', 'id')
+                    ->where('tenant_id', TenantContext::id())
+                    ->where('type', 'expense'),
+            ],
         ];
     }
 }

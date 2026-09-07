@@ -88,6 +88,15 @@ class Allocation extends Model
     }
 
     /**
+     * Expense accounts linked to this allocation for auto-spend fulfillment.
+     */
+    public function expenseAccounts(): BelongsToMany
+    {
+        return $this->belongsToMany(Account::class, 'allocation_expense_accounts', 'allocation_id', 'account_id')
+            ->withTimestamps();
+    }
+
+    /**
      * Journals linked to this allocation.
      */
     public function journals(): HasMany
@@ -104,14 +113,17 @@ class Allocation extends Model
     }
 
     /**
-     * Realized spending from journal transactions linked to this allocation.
+     * Realized spending from journal transactions linked to this allocation (explicitly or via auto-spend expense accounts).
      */
     public function journalRealizedAmount(?CarbonInterface $start = null, ?CarbonInterface $end = null): float
     {
+        $expenseAccountIds = $this->relationLoaded('expenseAccounts')
+            ? $this->expenseAccounts->pluck('id')->all()
+            : $this->expenseAccounts()->pluck('accounts.id')->all();
+
         $query = JournalLine::query()
             ->whereHas('journal', function ($q) use ($start, $end) {
-                $q->where('allocation_id', $this->id)
-                    ->whereIn('status', ['posted', 'archived'])
+                $q->whereIn('status', ['posted', 'archived'])
                     ->whereDoesntHave('reversals');
 
                 if ($start) {
@@ -119,6 +131,16 @@ class Allocation extends Model
                 }
                 if ($end) {
                     $q->whereDate('transaction_date', '<=', $end);
+                }
+            })
+            ->where(function ($q) use ($expenseAccountIds) {
+                $q->whereHas('journal', fn ($j) => $j->where('allocation_id', $this->id));
+
+                if ($expenseAccountIds !== []) {
+                    $q->orWhere(function ($auto) use ($expenseAccountIds) {
+                        $auto->whereHas('journal', fn ($j) => $j->whereNull('allocation_id'))
+                            ->whereIn('account_id', $expenseAccountIds);
+                    });
                 }
             })
             ->whereHas('account', fn ($q) => $q->where('type', 'expense'));

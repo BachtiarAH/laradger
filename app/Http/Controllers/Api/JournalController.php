@@ -38,7 +38,20 @@ class JournalController extends Controller
             ->with(['tags', 'allocation', 'goal'])
             ->when(request('status'), fn ($query) => $query->where('status', request('status')))
             ->when(request('source'), fn ($query) => $query->where('source', request('source')))
-            ->when(request('allocation_id'), fn ($query) => $query->where('allocation_id', request('allocation_id')))
+            ->when(request('allocation_id'), function ($query, $allocationId) {
+                $allocation = Allocation::find($allocationId);
+                $accountIds = $allocation ? $allocation->expenseAccounts()->pluck('accounts.id')->all() : [];
+
+                $query->where(function ($q) use ($allocationId, $accountIds) {
+                    $q->where('allocation_id', $allocationId);
+                    if ($accountIds !== []) {
+                        $q->orWhere(function ($auto) use ($accountIds) {
+                            $auto->whereNull('allocation_id')
+                                ->whereHas('lines', fn ($l) => $l->whereIn('account_id', $accountIds));
+                        });
+                    }
+                });
+            })
             ->when(request('goal_id'), fn ($query) => $query->where('goal_id', request('goal_id')))
             ->when(request('from'), fn ($query) => $query->whereDate('transaction_date', '>=', request('from')))
             ->when(request('to'), fn ($query) => $query->whereDate('transaction_date', '<=', request('to')))

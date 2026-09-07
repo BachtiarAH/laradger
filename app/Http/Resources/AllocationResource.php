@@ -56,6 +56,10 @@ class AllocationResource extends JsonResource
                     'amount' => number_format((float) $account->pivot->amount, 2, '.', ''),
                 ])->values()->all();
             }),
+            'expense_accounts' => AccountResource::collection($this->whenLoaded('expenseAccounts')),
+            'expense_account_ids' => $this->relationLoaded('expenseAccounts')
+                ? $this->expenseAccounts->pluck('id')->values()->all()
+                : $this->expenseAccounts()->pluck('accounts.id')->values()->all(),
         ];
     }
 

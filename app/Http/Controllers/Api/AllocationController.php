@@ -28,7 +28,7 @@ class AllocationController extends Controller
     {
         $this->authorize('viewAny', Allocation::class);
 
-        $allocations = Allocation::with('accounts')
+        $allocations = Allocation::with(['accounts', 'expenseAccounts'])
             ->when($request->filled('search'), fn ($query) => $query->where('name', 'like', '%'.$request->string('search').'%'))
             ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')->toString()))
             ->orderBy('name')
@@ -40,14 +40,18 @@ class AllocationController extends Controller
     public function store(string $tenant, StoreAllocationRequest $request): JsonResponse
     {
         $allocation = DB::transaction(function () use ($request) {
-            $allocation = Allocation::create($request->validated());
+            $allocation = Allocation::create($request->safe()->except('expense_account_ids'));
+
+            if ($request->has('expense_account_ids')) {
+                $allocation->expenseAccounts()->sync($request->input('expense_account_ids', []));
+            }
 
             $this->logAudit($allocation, 'allocation.created', after: $this->snapshot($allocation));
 
             return $allocation;
         });
 
-        return (new AllocationResource($allocation->load('accounts')))
+        return (new AllocationResource($allocation->load(['accounts', 'expenseAccounts'])))
             ->response()
             ->setStatusCode(201);
     }
@@ -56,7 +60,7 @@ class AllocationController extends Controller
     {
         $this->authorize('view', $allocation);
 
-        return new AllocationResource($allocation->load('accounts'));
+        return new AllocationResource($allocation->load(['accounts', 'expenseAccounts']));
     }
 
     public function update(string $tenant, UpdateAllocationRequest $request, Allocation $allocation): AllocationResource
@@ -66,12 +70,16 @@ class AllocationController extends Controller
         DB::transaction(function () use ($request, $allocation) {
             $before = $this->snapshot($allocation);
 
-            $allocation->update($request->validated());
+            $allocation->update($request->safe()->except('expense_account_ids'));
+
+            if ($request->has('expense_account_ids')) {
+                $allocation->expenseAccounts()->sync($request->input('expense_account_ids', []));
+            }
 
             $this->logAudit($allocation, 'allocation.updated', before: $before, after: $this->snapshot($allocation->fresh()));
         });
 
-        return new AllocationResource($allocation->fresh('accounts'));
+        return new AllocationResource($allocation->fresh(['accounts', 'expenseAccounts']));
     }
 
     public function destroy(string $tenant, Allocation $allocation): JsonResponse

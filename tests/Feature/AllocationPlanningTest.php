@@ -262,3 +262,68 @@ test('safe to spend ignores reservations of soft-deleted allocations', function 
         ->and($resAfter['allocated']['total_target'])->toBe('500000.00')
         ->and($resAfter['safe_to_spend'])->toBe('4500000.00');
 });
+
+test('allocation can auto-spend when expenses occur on linked expense accounts', function () {
+    $checking = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'name' => 'BCA', 'status' => 'active']);
+    $foodGrocery = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense', 'name' => 'Bahan Makanan', 'status' => 'active']);
+    $foodDining = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense', 'name' => 'Makan di Luar', 'status' => 'active']);
+
+    // Seed checking balance
+    $opening = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);
+    $opening->lines()->create(['account_id' => $checking->id, 'debit' => 5000000, 'credit' => 0]);
+
+    // Create allocation linked to two expense accounts
+    $res = $this->postJson("/api/v1/{$this->tenant->slug}/allocations", [
+        'name' => 'Makan & Minum',
+        'target_amount' => 1000000,
+        'type' => 'recurring',
+        'expense_account_ids' => [$foodGrocery->id, $foodDining->id],
+    ])->assertCreated();
+
+    $allocationId = $res->json('data.id');
+    expect($res->json('data.expense_account_ids'))->toContain($foodGrocery->id, $foodDining->id)
+        ->and($res->json('data.realized_amount'))->toBe('0.00');
+
+    // Expense 1: Grocery 300k WITHOUT specifying allocation_id!
+    $this->postJson("/api/v1/{$this->tenant->slug}/transactions", [
+        'type' => 'expense',
+        'amount' => 300000,
+        'expense_account_id' => $foodGrocery->id,
+        'asset_account_id' => $checking->id,
+        'description' => 'Beli beras dan sayur',
+        'status' => 'posted',
+    ])->assertCreated();
+
+    // Check allocation auto-spent
+    $check1 = $this->getJson("/api/v1/{$this->tenant->slug}/allocations/{$allocationId}")
+        ->assertOk()
+        ->json('data');
+
+    expect($check1['realized_amount'])->toBe('300000.00')
+        ->and($check1['remaining_amount'])->toBe('700000.00')
+        ->and((float) $check1['progress_percent'])->toEqual(30.0);
+
+    // Expense 2: Dining out 200k on the second linked expense account WITHOUT specifying allocation_id!
+    $this->postJson("/api/v1/{$this->tenant->slug}/transactions", [
+        'type' => 'expense',
+        'amount' => 200000,
+        'expense_account_id' => $foodDining->id,
+        'asset_account_id' => $checking->id,
+        'description' => 'Makan di warung',
+        'status' => 'posted',
+    ])->assertCreated();
+
+    // Check allocation auto-spent cumulative
+    $check2 = $this->getJson("/api/v1/{$this->tenant->slug}/allocations/{$allocationId}")
+        ->assertOk()
+        ->json('data');
+
+    expect($check2['realized_amount'])->toBe('500000.00')
+        ->and($check2['remaining_amount'])->toBe('500000.00')
+        ->and((float) $check2['progress_percent'])->toEqual(50.0);
+
+    // Check journals list for allocation also returns both auto-spent transactions
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals?allocation_id={$allocationId}")
+        ->assertOk()
+        ->assertJsonCount(2, 'data');
+});

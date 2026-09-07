@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Account;
+use App\Models\Allocation;
 use App\Models\Journal;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -30,13 +31,24 @@ class TransactionService
                 default => throw ValidationException::withMessages(['type' => 'Unknown transaction type.']),
             };
 
+            $allocationId = $data['allocation_id'] ?? null;
+            if (! $allocationId && $type === 'expense' && isset($data['expense_account_id'])) {
+                $autoAllocation = Allocation::active()
+                    ->whereHas('expenseAccounts', fn ($q) => $q->where('accounts.id', $data['expense_account_id']))
+                    ->first();
+
+                if ($autoAllocation) {
+                    $allocationId = $autoAllocation->id;
+                }
+            }
+
             $journal = Journal::create([
                 'transaction_date' => $date,
                 'description' => $description ?: $sourceDescription,
                 'reference' => $reference,
                 'status' => $data['status'] ?? 'draft',
                 'source' => 'manual',
-                'allocation_id' => $data['allocation_id'] ?? null,
+                'allocation_id' => $allocationId,
                 'goal_id' => $data['goal_id'] ?? null,
             ]);
 
