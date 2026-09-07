@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreJournalRequest;
+use App\Http\Requests\UpdateJournalPlanningRequest;
 use App\Http\Requests\UpdateJournalRequest;
 use App\Http\Resources\JournalResource;
 use App\Models\Account;
@@ -148,6 +149,18 @@ class JournalController extends Controller
 
             $journal->update($request->safe()->except(['lines', 'tags']));
         });
+
+        return new JournalResource($journal->fresh('lines.account', 'tags', 'allocation', 'goal'));
+    }
+
+    public function updatePlanning(string $tenant, UpdateJournalPlanningRequest $request, Journal $journal): JournalResource
+    {
+        $this->authorize('linkPlanning', $journal);
+
+        $journal->update([
+            'allocation_id' => $request->input('allocation_id'),
+            'goal_id' => $request->input('goal_id'),
+        ]);
 
         return new JournalResource($journal->fresh('lines.account', 'tags', 'allocation', 'goal'));
     }

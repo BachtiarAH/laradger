@@ -227,7 +227,7 @@ test('allocation supports manual realization without journal transactions', func
 });
 
 test('safe to spend ignores reservations of soft-deleted allocations', function () {
-    $bri = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $bri = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'status' => 'active']);
 
     $opening = Journal::factory()->create([
         'tenant_id' => $this->tenant->id,

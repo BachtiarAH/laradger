@@ -74,6 +74,7 @@ Route::prefix('v1')->group(function () {
         Route::post('allocations/{allocation}/cancel', [AllocationController::class, 'cancel']);
         Route::apiResource('goals', GoalController::class);
         Route::apiResource('journals', JournalController::class);
+        Route::patch('journals/{journal}/planning', [JournalController::class, 'updatePlanning']);
         Route::post('journals/ai-draft', [AiJournalDraftController::class, 'store']);
         Route::post('journals/{journal}/reverse', [JournalController::class, 'reverse']);
         Route::apiResource('journal-templates', JournalTemplateController::class);

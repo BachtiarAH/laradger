@@ -48,9 +48,15 @@ class Journal extends Model
             $originalStatus = $journal->getOriginal('status');
 
             if ($originalStatus !== 'draft') {
-                throw ValidationException::withMessages([
-                    'status' => 'Posted or archived journals are immutable. Use reversal + correction journal instead.',
-                ]);
+                // Planning links (goal_id, allocation_id) are mutable on posted/archived journals.
+                // Financial fields, status transitions, and accounting integrity remain strictly immutable.
+                $forbiddenDirty = array_diff(array_keys($journal->getDirty()), ['goal_id', 'allocation_id', 'updated_at']);
+
+                if ($forbiddenDirty !== []) {
+                    throw ValidationException::withMessages([
+                        'status' => 'Posted or archived journals are immutable. Use reversal + correction journal instead.',
+                    ]);
+                }
             }
         });
 

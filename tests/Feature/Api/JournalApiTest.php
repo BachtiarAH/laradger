@@ -8,6 +8,7 @@ use App\Models\JournalLine;
 use App\Models\Tag;
 use App\Models\User;
 use App\Services\Ai\Contracts\AiCallRecorder;
+use App\Tenancy\TenantContext;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Mockery;
@@ -484,4 +485,121 @@ test('a journal can be created and filtered with allocation and goal', function 
     ])->assertOk()
         ->assertJsonPath('data.allocation_id', $allocation->id)
         ->assertJsonPath('data.goal_id', null);
+});
+
+test('posted journal can have its planning links (goal and allocation) updated retroactively', function () {
+    $checking = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'name' => 'Checking']);
+    $savings = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'name' => 'Savings Pocket']);
+
+    // An already posted transfer journal with no goal attached initially
+    $postedJournal = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'status' => 'posted',
+        'description' => 'Past transfer to savings',
+    ]);
+    $postedJournal->lines()->create(['account_id' => $checking->id, 'debit' => 0, 'credit' => 500000]);
+    $postedJournal->lines()->create(['account_id' => $savings->id, 'debit' => 500000, 'credit' => 0]);
+
+    $goal = Goal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Adik Savings',
+        'target_amount' => 5000000,
+    ]);
+
+    // Initially goal has 0 accumulated
+    expect($goal->fresh()->accumulatedAmount())->toBe(0.0);
+
+    // Retroactively link the posted journal to the goal
+    $res = $this->patchJson("/api/v1/{$this->tenant->slug}/journals/{$postedJournal->id}/planning", [
+        'goal_id' => $goal->id,
+    ])->assertOk();
+
+    $res->assertJsonPath('data.goal_id', $goal->id)
+        ->assertJsonPath('data.goal.name', 'Adik Savings');
+
+    TenantContext::set($this->tenant);
+
+    // Goal now immediately sees the 500k accumulated!
+    expect($goal->fresh()->accumulatedAmount())->toBe(500000.0);
+
+    // Unlinking the goal immediately recalculates accumulated to 0
+    $this->patchJson("/api/v1/{$this->tenant->slug}/journals/{$postedJournal->id}/planning", [
+        'goal_id' => null,
+    ])->assertOk()
+        ->assertJsonPath('data.goal_id', null);
+
+    TenantContext::set($this->tenant);
+    expect($goal->fresh()->accumulatedAmount())->toBe(0.0);
+});
+
+test('posted expense journal can have its allocation link updated retroactively', function () {
+    $checking = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'name' => 'Checking']);
+    $expense = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense', 'name' => 'Food']);
+
+    $postedJournal = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'status' => 'posted',
+        'description' => 'Past food expense',
+    ]);
+    $postedJournal->lines()->create(['account_id' => $checking->id, 'debit' => 0, 'credit' => 200000]);
+    $postedJournal->lines()->create(['account_id' => $expense->id, 'debit' => 200000, 'credit' => 0]);
+
+    $allocation = Allocation::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Food Allowance',
+        'target_amount' => 1000000,
+    ]);
+
+    expect($allocation->fresh()->realizedAmount())->toBe(0.0);
+
+    $this->patchJson("/api/v1/{$this->tenant->slug}/journals/{$postedJournal->id}/planning", [
+        'allocation_id' => $allocation->id,
+    ])->assertOk()
+        ->assertJsonPath('data.allocation_id', $allocation->id)
+        ->assertJsonPath('data.allocation.name', 'Food Allowance');
+
+    TenantContext::set($this->tenant);
+    expect($allocation->fresh()->realizedAmount())->toBe(200000.0)
+        ->and($allocation->fresh()->remainingAmount())->toBe(800000.0);
+});
+
+test('posted journal planning update is tenant scoped', function () {
+    $otherUser = User::factory()->create();
+    $otherTenant = createTenantForUser($otherUser);
+
+    $postedJournal = Journal::factory()->create([
+        'tenant_id' => $otherTenant->id,
+        'status' => 'posted',
+    ]);
+
+    $goal = Goal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+    ]);
+
+    $this->patchJson("/api/v1/{$this->tenant->slug}/journals/{$postedJournal->id}/planning", [
+        'goal_id' => $goal->id,
+    ])->assertNotFound();
+});
+
+test('cannot link allocation to a posted journal without expense accounts', function () {
+    $checking = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'name' => 'Checking']);
+    $savings = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset', 'name' => 'Savings']);
+
+    $postedJournal = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'status' => 'posted',
+        'description' => 'Transfer between assets',
+    ]);
+    $postedJournal->lines()->create(['account_id' => $checking->id, 'debit' => 0, 'credit' => 100000]);
+    $postedJournal->lines()->create(['account_id' => $savings->id, 'debit' => 100000, 'credit' => 0]);
+
+    $allocation = Allocation::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Food Budget',
+    ]);
+
+    $this->patchJson("/api/v1/{$this->tenant->slug}/journals/{$postedJournal->id}/planning", [
+        'allocation_id' => $allocation->id,
+    ])->assertStatus(422)
+        ->assertJsonValidationErrors(['allocation_id']);
 });

@@ -31,6 +31,11 @@ class JournalPolicy
             && $journal->status === 'draft';
     }
 
+    public function linkPlanning(User $user, Journal $journal): bool
+    {
+        return $user->belongsToTenant($journal->tenant_id);
+    }
+
     public function delete(User $user, Journal $journal): bool
     {
         return $user->belongsToTenant($journal->tenant_id)
