@@ -10,10 +10,14 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class JournalTemplateService
 {
+    public function __construct(private readonly AllocationResolver $allocationResolver) {}
+
     /**
      * Generate a journal entry from a template. Amounts default to the
      * template's line values but may be overridden per line.
@@ -35,8 +39,17 @@ class JournalTemplateService
                 TenantContext::set(Tenant::findOrFail($template->tenant_id));
 
                 try {
-
                     $date = $transactionDate ?? now();
+                    $defaultLines = $template->lines()->get();
+                    $overrideRows = $lineOverrides ? array_values($lineOverrides) : [];
+                    $allocationId = $this->allocationResolver->resolveForTemplate(
+                        $template->allocation_id,
+                        $defaultLines->values()->map(
+                            fn ($line, int $index) => [
+                                'account_id' => $overrideRows[$index]['account_id'] ?? $line->account_id,
+                            ],
+                        )->all(),
+                    );
 
                     $journal = Journal::create([
                         'transaction_date' => $date,
@@ -45,10 +58,8 @@ class JournalTemplateService
                             : $template->name,
                         'status' => 'draft',
                         'source' => 'system',
+                        'allocation_id' => $allocationId,
                     ]);
-
-                    $defaultLines = $template->lines()->get();
-                    $overrideRows = $lineOverrides ? array_values($lineOverrides) : [];
 
                     foreach ($defaultLines as $index => $line) {
                         $override = $overrideRows[$index] ?? [];
@@ -108,9 +119,17 @@ class JournalTemplateService
                 })
                 ->get()
                 ->each(function (JournalTemplate $template) use ($now, $created): void {
-                    $journal = $this->generate($template, $now);
-                    $created->push($journal);
-                    $this->advanceSchedule($template, $now);
+                    try {
+                        $journal = $this->generate($template, $now);
+                        $created->push($journal);
+                        $this->advanceSchedule($template, $now);
+                    } catch (ValidationException $exception) {
+                        Log::warning('Skipped ambiguous journal template during scheduled generation.', [
+                            'template_id' => $template->id,
+                            'tenant_id' => $template->tenant_id,
+                            'errors' => $exception->errors(),
+                        ]);
+                    }
                 });
         });
 

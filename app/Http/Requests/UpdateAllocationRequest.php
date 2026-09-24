@@ -2,11 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\AllocationStatus;
 use App\Models\Allocation;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateAllocationRequest extends FormRequest
 {
@@ -44,10 +46,53 @@ class UpdateAllocationRequest extends FormRequest
             'expense_account_ids' => ['sometimes', 'nullable', 'array'],
             'expense_account_ids.*' => [
                 'uuid',
+                'distinct',
                 Rule::exists('accounts', 'id')
                     ->where('tenant_id', TenantContext::id())
                     ->where('type', 'expense'),
             ],
+        ];
+    }
+
+    public function after(): array
+    {
+        return [
+            function (Validator $validator): void {
+                $allocation = $this->route('allocation');
+                if (! $allocation instanceof Allocation) {
+                    return;
+                }
+
+                $currentStatus = $allocation->status instanceof AllocationStatus
+                    ? $allocation->status->value
+                    : $allocation?->status;
+                $status = $this->input('status', $currentStatus);
+
+                if ($status !== AllocationStatus::Active->value) {
+                    return;
+                }
+
+                $accountIds = $this->has('expense_account_ids')
+                    ? collect($this->input('expense_account_ids', []))->filter()->unique()->values()
+                    : $allocation?->expenseAccounts()->pluck('accounts.id') ?? collect();
+
+                if ($accountIds->isEmpty()) {
+                    return;
+                }
+
+                $hasConflict = Allocation::query()
+                    ->active()
+                    ->where('id', '!=', $allocation->id)
+                    ->whereHas('expenseAccounts', fn ($query) => $query->whereIn('accounts.id', $accountIds))
+                    ->exists();
+
+                if ($hasConflict) {
+                    $validator->errors()->add(
+                        'expense_account_ids',
+                        'An expense account can only belong to one active auto allocation.',
+                    );
+                }
+            },
         ];
     }
 }

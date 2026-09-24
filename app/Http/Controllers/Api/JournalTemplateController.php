@@ -26,7 +26,7 @@ class JournalTemplateController extends Controller
         $this->authorize('viewAny', JournalTemplate::class);
 
         $templates = JournalTemplate::withCount('lines')
-            ->with('tags')
+            ->with(['tags', 'allocation'])
             ->when(request('period_type'), fn ($q) => $q->where('period_type', request('period_type')))
             ->when(request('is_active'), fn ($q) => $q->where('is_active', filter_var(request('is_active'), FILTER_VALIDATE_BOOLEAN)))
             ->when(request('search'), fn ($q) => $q->where('name', 'like', '%'.request('search').'%'))
@@ -56,7 +56,7 @@ class JournalTemplateController extends Controller
             return $template;
         });
 
-        return (new JournalTemplateResource($template->load('lines.account', 'tags')))
+        return (new JournalTemplateResource($template->load('lines.account', 'tags', 'allocation')))
             ->response()
             ->setStatusCode(201);
     }
@@ -65,7 +65,7 @@ class JournalTemplateController extends Controller
     {
         $this->authorize('view', $journalTemplate);
 
-        return new JournalTemplateResource($journalTemplate->load('lines.account', 'tags'));
+        return new JournalTemplateResource($journalTemplate->load('lines.account', 'tags', 'allocation'));
     }
 
     public function update(string $tenant, UpdateJournalTemplateRequest $request, JournalTemplate $journalTemplate): JournalTemplateResource
@@ -89,7 +89,7 @@ class JournalTemplateController extends Controller
             }
         });
 
-        return new JournalTemplateResource($journalTemplate->fresh('lines.account', 'tags'));
+        return new JournalTemplateResource($journalTemplate->fresh('lines.account', 'tags', 'allocation'));
     }
 
     public function destroy(string $tenant, JournalTemplate $journalTemplate): JsonResponse
@@ -122,7 +122,7 @@ class JournalTemplateController extends Controller
 
         $this->templateService->advanceSchedule($journalTemplate, $transactionDate ?? now());
 
-        return (new JournalResource($journal->load('lines.account', 'tags')))
+        return (new JournalResource($journal->load('lines.account', 'tags', 'allocation')))
             ->response()
             ->setStatusCode(201);
     }

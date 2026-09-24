@@ -3,13 +3,14 @@
 namespace App\Services;
 
 use App\Models\Account;
-use App\Models\Allocation;
 use App\Models\Journal;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class TransactionService
 {
+    public function __construct(private readonly AllocationResolver $allocationResolver) {}
+
     /**
      * @param  array<string, mixed>  $data  validated data
      */
@@ -32,14 +33,8 @@ class TransactionService
             };
 
             $allocationId = $data['allocation_id'] ?? null;
-            if (! $allocationId && $type === 'expense' && isset($data['expense_account_id'])) {
-                $autoAllocation = Allocation::active()
-                    ->whereHas('expenseAccounts', fn ($q) => $q->where('accounts.id', $data['expense_account_id']))
-                    ->first();
-
-                if ($autoAllocation) {
-                    $allocationId = $autoAllocation->id;
-                }
+            if ($type === 'expense') {
+                $allocationId = $this->allocationResolver->resolveForJournal($allocationId, $lines);
             }
 
             $journal = Journal::create([

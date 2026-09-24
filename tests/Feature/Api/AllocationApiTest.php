@@ -79,6 +79,30 @@ test('an allocation can be created and audited', function () {
     ]);
 });
 
+test('an expense account cannot belong to two active auto allocations', function () {
+    $expense = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense']);
+    $first = Allocation::factory()->create(['tenant_id' => $this->tenant->id, 'name' => 'Food A']);
+    $first->expenseAccounts()->attach($expense->id);
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/allocations", [
+        'name' => 'Food B',
+        'expense_account_ids' => [$expense->id],
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['expense_account_ids']);
+
+    $inactive = Allocation::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Inactive Food',
+        'status' => 'cancelled',
+    ]);
+    $inactive->expenseAccounts()->attach($expense->id);
+
+    $this->putJson("/api/v1/{$this->tenant->slug}/allocations/{$inactive->id}", [
+        'status' => 'active',
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['expense_account_ids']);
+});
+
 test('creating an allocation validates required fields', function () {
     $this->postJson("/api/v1/{$this->tenant->slug}/allocations", [])
         ->assertStatus(422)

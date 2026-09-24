@@ -12,6 +12,7 @@ use App\Models\Allocation;
 use App\Models\Journal;
 use App\Services\Ai\Contracts\AiCallRecorder;
 use App\Services\AllocationAdjustmentService;
+use App\Services\AllocationResolver;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -26,6 +27,7 @@ class JournalController extends Controller
     public function __construct(
         private readonly AiCallRecorder $aiCallRecorder,
         private readonly AllocationAdjustmentService $allocationAdjustments,
+        private readonly AllocationResolver $allocationResolver,
     ) {}
 
     public function index(string $tenant): AnonymousResourceCollection
@@ -79,12 +81,19 @@ class JournalController extends Controller
     {
         $this->authorize('create', Journal::class);
 
+        $data = $request->safe()->except(['lines', 'tags', 'ai_record_id']);
+        $lines = $request->validated('lines', []);
+        $data['allocation_id'] = $this->allocationResolver->resolveForJournal(
+            $data['allocation_id'] ?? null,
+            $lines,
+        );
+
         $journal = retry(
             times: 3,
-            callback: fn () => DB::transaction(function () use ($request) {
-                $journal = Journal::create($request->safe()->except(['lines', 'tags', 'ai_record_id']));
+            callback: fn () => DB::transaction(function () use ($data, $lines, $request) {
+                $journal = Journal::create($data);
 
-                foreach ($request->validated('lines', []) as $index => $line) {
+                foreach ($lines as $index => $line) {
                     $journal->lines()->create($line + ['line_number' => $index + 1]);
                 }
 

@@ -28,6 +28,7 @@ class JournalTemplateFactory extends Factory
             'day_of_month' => null,
             'next_run_at' => now()->addDay(),
             'last_run_at' => null,
+            'allocation_id' => null,
         ];
     }
 

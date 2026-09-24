@@ -8,6 +8,7 @@ use Database\Factories\JournalTemplateFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -27,6 +28,7 @@ class JournalTemplate extends Model
         'day_of_month',
         'next_run_at',
         'last_run_at',
+        'allocation_id',
     ];
 
     protected function casts(): array
@@ -49,6 +51,11 @@ class JournalTemplate extends Model
     public function tags(): BelongsToMany
     {
         return $this->belongsToMany(Tag::class, 'journal_template_tags')->withTimestamps();
+    }
+
+    public function allocation(): BelongsTo
+    {
+        return $this->belongsTo(Allocation::class);
     }
 
     /**

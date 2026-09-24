@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\AllocationStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,6 +25,12 @@ class JournalTemplateResource extends JsonResource
             'day_of_month' => $this->day_of_month,
             'next_run_at' => $this->next_run_at?->toIso8601String(),
             'last_run_at' => $this->last_run_at?->toIso8601String(),
+            'allocation_id' => $this->allocation_id,
+            'allocation' => $this->whenLoaded('allocation', fn () => $this->allocation ? [
+                'id' => $this->allocation->id,
+                'name' => $this->allocation->name,
+                'status' => $this->allocation->status instanceof AllocationStatus ? $this->allocation->status->value : $this->allocation->status,
+            ] : null),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
             'lines_count' => (int) ($this->lines_count ?? ($this->relationLoaded('lines') ? $this->lines->count() : 0)),

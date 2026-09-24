@@ -24,6 +24,13 @@ class StoreJournalTemplateRequest extends FormRequest
             'is_active' => ['sometimes', 'boolean'],
             'day_of_week' => ['nullable', 'integer', 'between:0,6'],
             'day_of_month' => ['nullable', 'integer', 'between:1,31'],
+            'allocation_id' => [
+                'nullable',
+                'uuid',
+                Rule::exists('allocations', 'id')
+                    ->where('tenant_id', TenantContext::id())
+                    ->whereNull('deleted_at'),
+            ],
             'lines' => ['required', 'array', 'min:1', new BalancedJournalLines],
             'lines.*.account_id' => ['required', 'uuid', Rule::exists('accounts', 'id')->where('tenant_id', TenantContext::id())],
             'lines.*.debit' => ['nullable', 'numeric', 'min:0'],

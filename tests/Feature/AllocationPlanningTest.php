@@ -327,3 +327,74 @@ test('allocation can auto-spend when expenses occur on linked expense accounts',
         ->assertOk()
         ->assertJsonCount(2, 'data');
 });
+
+test('an explicit quick transaction allocation wins over an auto match', function () {
+    $asset = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $expense = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense']);
+    $autoAllocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id]);
+    $explicitAllocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id]);
+    $autoAllocation->expenseAccounts()->attach($expense->id);
+
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/transactions", [
+        'type' => 'expense',
+        'amount' => 100000,
+        'expense_account_id' => $expense->id,
+        'asset_account_id' => $asset->id,
+        'allocation_id' => $explicitAllocation->id,
+        'description' => 'Explicit allocation',
+        'status' => 'posted',
+    ])->assertCreated();
+
+    expect($response->json('data.allocation_id'))->toBe($explicitAllocation->id);
+    $this->getJson("/api/v1/{$this->tenant->slug}/allocations/{$autoAllocation->id}")
+        ->assertOk()
+        ->assertJsonPath('data.journal_realized_amount', '0.00');
+    $this->getJson("/api/v1/{$this->tenant->slug}/allocations/{$explicitAllocation->id}")
+        ->assertOk()
+        ->assertJsonPath('data.journal_realized_amount', '100000.00');
+});
+
+test('a manual journal without an explicit allocation resolves one active auto allocation', function () {
+    $asset = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $expense = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense']);
+    $allocation = Allocation::factory()->create(['tenant_id' => $this->tenant->id]);
+    $allocation->expenseAccounts()->attach($expense->id);
+
+    $response = $this->postJson("/api/v1/{$this->tenant->slug}/journals", [
+        'transaction_date' => now()->toDateString(),
+        'description' => 'Auto-linked manual expense',
+        'status' => 'posted',
+        'source' => 'manual',
+        'lines' => [
+            ['account_id' => $expense->id, 'debit' => 100000, 'credit' => 0],
+            ['account_id' => $asset->id, 'debit' => 0, 'credit' => 100000],
+        ],
+    ])->assertCreated();
+
+    expect($response->json('data.allocation_id'))->toBe($allocation->id);
+    $this->getJson("/api/v1/{$this->tenant->slug}/allocations/{$allocation->id}")
+        ->assertOk()
+        ->assertJsonPath('data.journal_realized_amount', '100000.00');
+});
+
+test('a quick transaction stops when an expense account has multiple auto allocations', function () {
+    $asset = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'asset']);
+    $expense = Account::factory()->create(['tenant_id' => $this->tenant->id, 'type' => 'expense']);
+    $first = Allocation::factory()->create(['tenant_id' => $this->tenant->id]);
+    $second = Allocation::factory()->create(['tenant_id' => $this->tenant->id]);
+    $first->expenseAccounts()->attach($expense->id);
+    $second->expenseAccounts()->attach($expense->id);
+    $journalCount = Journal::count();
+
+    $this->postJson("/api/v1/{$this->tenant->slug}/transactions", [
+        'type' => 'expense',
+        'amount' => 100000,
+        'expense_account_id' => $expense->id,
+        'asset_account_id' => $asset->id,
+        'description' => 'Ambiguous expense',
+        'status' => 'draft',
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['allocation_id']);
+
+    expect(Journal::count())->toBe($journalCount);
+});
