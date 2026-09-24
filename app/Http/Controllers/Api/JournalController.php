@@ -32,6 +32,19 @@ class JournalController extends Controller
     {
         $this->authorize('viewAny', Journal::class);
 
+        $sortColumns = [
+            'reference' => 'reference',
+            'description' => 'description',
+            'transaction_date' => 'transaction_date',
+            'status' => 'status',
+            'source' => 'source',
+            'total_debit' => 'lines_sum_debit',
+            'lines_count' => 'lines_count',
+        ];
+        $sortBy = is_string(request('sort_by')) ? request('sort_by') : 'transaction_date';
+        $sortColumn = $sortColumns[$sortBy] ?? 'transaction_date';
+        $sortDirection = request('sort_direction', 'desc') === 'asc' ? 'asc' : 'desc';
+
         $journals = Journal::withCount('lines')
             ->withSum('lines', 'debit')
             ->withSum('lines', 'credit')
@@ -55,7 +68,8 @@ class JournalController extends Controller
             ->when(request('goal_id'), fn ($query) => $query->where('goal_id', request('goal_id')))
             ->when(request('from'), fn ($query) => $query->whereDate('transaction_date', '>=', request('from')))
             ->when(request('to'), fn ($query) => $query->whereDate('transaction_date', '<=', request('to')))
-            ->latest('transaction_date')
+            ->orderBy($sortColumn, $sortDirection)
+            ->orderBy('id', $sortDirection)
             ->paginate();
 
         return JournalResource::collection($journals);

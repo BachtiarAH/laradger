@@ -29,6 +29,36 @@ test('journals can be listed and filtered by status', function () {
         ->assertJsonCount(2, 'data');
 });
 
+test('journals can be sorted by selected columns', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $older = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'reference' => 'JRN-A',
+        'transaction_date' => '2026-01-01',
+        'status' => 'posted',
+    ]);
+    $older->lines()->create(['account_id' => $account->id, 'debit' => 100.00, 'credit' => 0]);
+
+    $newer = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'reference' => 'JRN-B',
+        'transaction_date' => '2026-02-01',
+        'status' => 'draft',
+    ]);
+    $newer->lines()->create(['account_id' => $account->id, 'debit' => 300.00, 'credit' => 0]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals?sort_by=transaction_date&sort_direction=asc")
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $older->id)
+        ->assertJsonPath('data.1.id', $newer->id);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/journals?sort_by=total_debit&sort_direction=desc")
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $newer->id)
+        ->assertJsonPath('data.0.total_debit', '300.00');
+});
+
 test('journal list includes line count and debit/credit totals', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
     $journal = Journal::factory()->create(['tenant_id' => $this->tenant->id, 'status' => 'posted']);

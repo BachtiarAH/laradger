@@ -183,6 +183,44 @@ test('an account can be updated', function () {
     ])->assertOk()->assertJsonPath('data.name', 'Updated Name');
 });
 
+test('account journal lines can be sorted by selected columns', function () {
+    $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
+
+    $first = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'reference' => 'JRN-A',
+        'transaction_date' => '2026-02-01',
+    ]);
+    $firstLine = $first->lines()->create([
+        'account_id' => $account->id,
+        'debit' => 100.00,
+        'credit' => 0,
+        'description' => 'Alpha',
+    ]);
+
+    $second = Journal::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'reference' => 'JRN-B',
+        'transaction_date' => '2026-01-01',
+    ]);
+    $secondLine = $second->lines()->create([
+        'account_id' => $account->id,
+        'debit' => 300.00,
+        'credit' => 0,
+        'description' => 'Beta',
+    ]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}/journal-lines?sort_by=reference&sort_direction=asc")
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $firstLine->id)
+        ->assertJsonPath('data.1.id', $secondLine->id);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/accounts/{$account->id}/journal-lines?sort_by=debit&sort_direction=desc")
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $secondLine->id)
+        ->assertJsonPath('data.0.debit', '300.00');
+});
+
 test('an account can be archived (soft-deleted)', function () {
     $account = Account::factory()->create(['tenant_id' => $this->tenant->id]);
 

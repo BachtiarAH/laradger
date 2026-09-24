@@ -136,19 +136,41 @@ class AccountController extends Controller
     {
         $this->authorize('view', $account);
 
-        $lines = JournalLine::with(['account', 'journal'])
-            ->where('account_id', $account->id)
+        $sortColumns = [
+            'reference' => 'journals.reference',
+            'transaction_date' => 'journals.transaction_date',
+            'debit' => 'journal_lines.debit',
+            'credit' => 'journal_lines.credit',
+            'status' => 'journals.status',
+        ];
+        $sortBy = is_string(request('sort_by')) ? request('sort_by') : 'transaction_date';
+        $sortDirection = request('sort_direction') === 'asc' ? 'asc' : 'desc';
+
+        $query = JournalLine::query()
+            ->select('journal_lines.*')
+            ->leftJoin('journals', 'journals.id', '=', 'journal_lines.journal_id')
+            ->whereNull('journals.deleted_at')
+            ->with(['account', 'journal'])
+            ->where('journal_lines.account_id', $account->id)
             ->when(request('status'), fn ($q) => $q->whereHas('journal', fn ($jq) => $jq->where('status', request('status'))))
             ->when(request('from'), fn ($q) => $q->whereHas('journal', fn ($jq) => $jq->whereDate('transaction_date', '>=', request('from'))))
             ->when(request('to'), fn ($q) => $q->whereHas('journal', fn ($jq) => $jq->whereDate('transaction_date', '<=', request('to'))))
             ->when(request('search'), function ($q): void {
                 $search = '%'.request('search').'%';
                 $q->where(function ($qq) use ($search): void {
-                    $qq->where('description', 'like', $search)
+                    $qq->where('journal_lines.description', 'like', $search)
                         ->orWhereHas('journal', fn ($jq) => $jq->where('reference', 'like', $search)->orWhere('description', 'like', $search));
                 });
-            })
-            ->latest('created_at')
+            });
+
+        if ($sortBy === 'description') {
+            $query->orderByRaw("COALESCE(NULLIF(journal_lines.description, ''), journals.description) {$sortDirection}");
+        } else {
+            $query->orderBy($sortColumns[$sortBy] ?? 'journals.transaction_date', $sortDirection);
+        }
+
+        $lines = $query
+            ->orderBy('journal_lines.id', $sortDirection)
             ->paginate((int) (request('per_page', 15)));
 
         return JournalLineResource::collection($lines);
