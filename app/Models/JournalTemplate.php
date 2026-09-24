@@ -24,6 +24,7 @@ class JournalTemplate extends Model
         'description',
         'period_type',
         'is_active',
+        'show_on_dashboard',
         'day_of_week',
         'day_of_month',
         'next_run_at',
@@ -36,6 +37,7 @@ class JournalTemplate extends Model
         return [
             'period_type' => 'string',
             'is_active' => 'boolean',
+            'show_on_dashboard' => 'boolean',
             'day_of_week' => 'integer',
             'day_of_month' => 'integer',
             'next_run_at' => 'datetime',

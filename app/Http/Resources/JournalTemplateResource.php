@@ -21,6 +21,7 @@ class JournalTemplateResource extends JsonResource
             'description' => $this->description,
             'period_type' => $this->period_type,
             'is_active' => $this->is_active,
+            'show_on_dashboard' => (bool) ($this->show_on_dashboard ?? true),
             'day_of_week' => $this->day_of_week,
             'day_of_month' => $this->day_of_month,
             'next_run_at' => $this->next_run_at?->toIso8601String(),

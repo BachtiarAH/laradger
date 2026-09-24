@@ -39,6 +39,37 @@ test('journal templates can be listed', function () {
         ->assertJsonCount(3, 'data');
 });
 
+test('dashboard visibility can be selected per template', function () {
+    $visible = JournalTemplate::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'show_on_dashboard' => true,
+    ]);
+    $hidden = JournalTemplate::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'show_on_dashboard' => false,
+    ]);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/journal-templates?is_active=true&show_on_dashboard=true")
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $visible->id);
+
+    $this->getJson("/api/v1/{$this->tenant->slug}/journal-templates?is_active=true&show_on_dashboard=false")
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.id', $hidden->id);
+
+    $this->putJson("/api/v1/{$this->tenant->slug}/journal-templates/{$hidden->id}", [
+        'show_on_dashboard' => true,
+    ])->assertOk()
+        ->assertJsonPath('data.show_on_dashboard', true);
+
+    $this->assertDatabaseHas('journal_templates', [
+        'id' => $hidden->id,
+        'show_on_dashboard' => true,
+    ]);
+});
+
 test('journal templates are isolated between tenants', function () {
     $template = JournalTemplate::factory()->create(['tenant_id' => $this->tenant->id]);
     $other = JournalTemplate::factory()->create();
@@ -56,6 +87,7 @@ test('a journal template can be created with lines and tags', function () {
         'description' => 'Office rent payment',
         'period_type' => 'monthly',
         'day_of_month' => 1,
+        'show_on_dashboard' => false,
         'lines' => makeTemplateLines($account),
         'tags' => [$tag->id],
     ]);
@@ -63,6 +95,7 @@ test('a journal template can be created with lines and tags', function () {
     $response->assertCreated()
         ->assertJsonPath('data.name', 'Monthly rent')
         ->assertJsonPath('data.period_type', 'monthly')
+        ->assertJsonPath('data.show_on_dashboard', false)
         ->assertJsonCount(2, 'data.lines')
         ->assertJsonCount(1, 'data.tags');
 });

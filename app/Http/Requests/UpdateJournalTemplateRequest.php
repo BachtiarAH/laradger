@@ -25,6 +25,7 @@ class UpdateJournalTemplateRequest extends FormRequest
             'description' => ['nullable', 'string', 'max:255'],
             'period_type' => ['sometimes', Rule::in(['daily', 'weekly', 'monthly'])],
             'is_active' => ['sometimes', 'boolean'],
+            'show_on_dashboard' => ['sometimes', 'boolean'],
             'day_of_week' => ['nullable', 'integer', 'between:0,6'],
             'day_of_month' => ['nullable', 'integer', 'between:1,31'],
             'allocation_id' => [

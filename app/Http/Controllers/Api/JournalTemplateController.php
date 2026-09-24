@@ -28,7 +28,8 @@ class JournalTemplateController extends Controller
         $templates = JournalTemplate::withCount('lines')
             ->with(['tags', 'allocation'])
             ->when(request('period_type'), fn ($q) => $q->where('period_type', request('period_type')))
-            ->when(request('is_active'), fn ($q) => $q->where('is_active', filter_var(request('is_active'), FILTER_VALIDATE_BOOLEAN)))
+            ->when(request()->has('is_active'), fn ($q) => $q->where('is_active', filter_var(request('is_active'), FILTER_VALIDATE_BOOLEAN)))
+            ->when(request()->has('show_on_dashboard'), fn ($q) => $q->where('show_on_dashboard', filter_var(request('show_on_dashboard'), FILTER_VALIDATE_BOOLEAN)))
             ->when(request('search'), fn ($q) => $q->where('name', 'like', '%'.request('search').'%'))
             ->latest()
             ->paginate();

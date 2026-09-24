@@ -24,6 +24,7 @@ class JournalTemplateFactory extends Factory
             'description' => $this->faker->sentence(),
             'period_type' => $this->faker->randomElement(['daily', 'weekly', 'monthly']),
             'is_active' => true,
+            'show_on_dashboard' => true,
             'day_of_week' => null,
             'day_of_month' => null,
             'next_run_at' => now()->addDay(),
