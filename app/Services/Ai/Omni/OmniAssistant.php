@@ -42,16 +42,32 @@ class OmniAssistant
     ) {}
 
     /**
-     * @return array{reply: string, drafts: Collection<int, AiActionDraft>, reads: array<int, array<string, mixed>>}
+     * Record what the user said.
+     *
+     * Deliberately separate from respond(): this runs inside the HTTP request,
+     * where the tenant context and the authenticated user are established, so
+     * the message is visible immediately. The AI work is then queued and runs
+     * later, without the user waiting for it.
      */
-    public function reply(AiConversation $conversation, string $userMessage): array
+    public function recordUserMessage(AiConversation $conversation, string $text): AiMessage
     {
-        $conversation->messages()->create([
+        return $conversation->messages()->create([
             'user_id' => auth()->id(),
             'role' => AiMessage::ROLE_USER,
-            'content' => $userMessage,
+            'content' => $text,
         ]);
+    }
 
+    /**
+     * Produce the assistant's reply and any proposed actions.
+     *
+     * Runs on the queue. The caller is responsible for having re-established
+     * the tenant context and the authenticated user, because a job has neither.
+     *
+     * @return array{reply: string, drafts: Collection<int, AiActionDraft>, reads: array<int, array<string, mixed>>}
+     */
+    public function respond(AiConversation $conversation): array
+    {
         $messages = $this->history($conversation);
         $options = ['tools' => $this->tools->definitions()];
 

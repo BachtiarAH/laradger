@@ -56,10 +56,27 @@ test('the openapi specification documents the assistant action endpoints', funct
         ->assertJsonPath('paths./{tenant}/ai/conversations.post.summary', 'Start a conversation')
         ->assertJsonPath(
             'paths./{tenant}/ai/conversations/{conversation}/messages.post.summary',
-            'Send a message and let the assistant act on it',
+            'Send a message and queue an assistant turn',
+        )
+        ->assertJsonPath(
+            'paths./{tenant}/ai/conversations/{conversation}/status.get.summary',
+            'Poll how far an assistant turn has got',
         )
         ->assertJsonPath('paths./{tenant}/ai/drafts.get.summary', "List the caller's proposed actions")
         ->assertJsonPath('paths./{tenant}/ai/drafts/{draft}.patch.summary', "Correct a draft's payload before approving it")
         ->assertJsonPath('paths./{tenant}/ai/drafts/{draft}/execute.post.summary', 'Approve a draft and apply it')
         ->assertJsonPath('paths./{tenant}/ai/drafts/{draft}/reject.post.summary', 'Discard a draft');
+});
+
+test('the openapi specification documents the queued turn as accepted, not done', function () {
+    $this->getJson('/api/docs')
+        ->assertOk()
+        // 202, because the turn happens in the background.
+        ->assertJsonStructure([
+            'paths' => [
+                '/{tenant}/ai/conversations/{conversation}/messages' => [
+                    'post' => ['responses' => ['202', '409']],
+                ],
+            ],
+        ]);
 });

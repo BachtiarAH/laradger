@@ -8,17 +8,19 @@ use App\Http\Requests\UpdateAiDraftRequest;
 use App\Http\Resources\AiActionDraftResource;
 use App\Http\Resources\AiConversationResource;
 use App\Http\Resources\AiMessageResource;
+use App\Jobs\RunAiAssistantTurn;
 use App\Models\AiActionDraft;
 use App\Models\AiConversation;
-use App\Services\Ai\Exceptions\AiProviderException;
 use App\Services\Ai\Omni\DraftExecutor;
 use App\Services\Ai\Omni\OmniAssistant;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
+use Throwable;
 
 class AiAssistantController extends Controller
 {
@@ -51,19 +53,47 @@ class AiAssistantController extends Controller
 
     public function show(string $tenant, AiConversation $conversation): JsonResponse
     {
-        $this->assertOwner($conversation, $request = request());
+        $this->assertOwner($conversation, request());
 
         $conversation->load(['messages', 'drafts']);
 
         return response()->json([
             'data' => [
-                'conversation' => (new AiConversationResource($conversation))->resolve($request),
-                'messages' => AiMessageResource::collection($conversation->messages)->resolve($request),
-                'drafts' => AiActionDraftResource::collection($conversation->drafts)->resolve($request),
+                'conversation' => (new AiConversationResource($conversation->refresh()))->resolve(request()),
+                'messages' => AiMessageResource::collection($conversation->messages)->resolve(request()),
+                'drafts' => AiActionDraftResource::collection($conversation->drafts)->resolve(request()),
             ],
         ]);
     }
 
+    /**
+     * Lightweight progress probe. The drawer polls this while a turn is in
+     * flight so it does not refetch the whole transcript every couple of
+     * seconds.
+     */
+    public function status(string $tenant, Request $request, AiConversation $conversation): JsonResponse
+    {
+        $this->assertOwner($conversation, $request);
+
+        return response()->json([
+            'data' => [
+                'status' => $conversation->status,
+                'error' => $conversation->error,
+                'pending_drafts_count' => $conversation->pendingDrafts()->count(),
+                'queued_at' => $conversation->queued_at?->toIso8601String(),
+                'started_at' => $conversation->started_at?->toIso8601String(),
+                'completed_at' => $conversation->completed_at?->toIso8601String(),
+            ],
+        ]);
+    }
+
+    /**
+     * Accept a message and queue the turn.
+     *
+     * Returns 202 immediately: the reply and any proposed actions are produced
+     * in the background, so the user does not wait on several paid model calls
+     * and can leave the page open or closed.
+     */
     public function sendMessage(
         string $tenant,
         SendAiMessageRequest $request,
@@ -71,22 +101,54 @@ class AiAssistantController extends Controller
     ): JsonResponse {
         $this->assertOwner($conversation, $request);
 
-        try {
-            $outcome = $this->assistant->reply($conversation, $request->validated('message'));
-        } catch (AiProviderException $e) {
+        // Two concurrent turns would interleave their transcripts and drafts.
+        if ($conversation->isBusy()) {
             return response()->json([
-                'message' => 'The assistant could not respond.',
-                'errors' => ['message' => [$e->getMessage()]],
-            ], 502);
+                'message' => 'A request is still being worked on in this conversation.',
+            ], 409);
+        }
+
+        $message = $this->assistant->recordUserMessage(
+            $conversation,
+            $request->validated('message'),
+        );
+
+        $conversation->forceFill([
+            'status' => AiConversation::STATUS_QUEUED,
+            'queued_at' => now(),
+            'error' => null,
+        ])->save();
+
+        // Under the `sync` driver the job runs inline, so a failing turn would
+        // otherwise surface as a 500 on the message itself. The contract is the
+        // same either way: the turn was accepted, and its outcome is reported
+        // through the status endpoint. A dispatch failure that leaves the
+        // conversation still "queued" is marked here so it cannot hang.
+        try {
+            RunAiAssistantTurn::dispatch($conversation->getKey(), $message->getKey())
+                ->onQueue((string) config('ai.queue.name', 'default'));
+        } catch (Throwable $e) {
+            Log::error('The AI assistant turn could not be queued.', [
+                'conversation_id' => $conversation->getKey(),
+                'message_id' => $message->getKey(),
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            $conversation->forceFill([
+                'status' => AiConversation::STATUS_FAILED,
+                'error' => 'The request could not be queued. Please try again.',
+                'completed_at' => now(),
+            ])->save();
         }
 
         return response()->json([
             'data' => [
-                'reply' => $outcome['reply'],
-                // Nothing has been applied. These are proposals awaiting review.
-                'drafts' => AiActionDraftResource::collection($outcome['drafts'])->resolve($request),
+                'status' => $conversation->refresh()->status,
+                'conversation_id' => $conversation->getKey(),
+                'message_id' => $message->getKey(),
             ],
-        ]);
+        ], 202);
     }
 
     public function drafts(Request $request): AnonymousResourceCollection

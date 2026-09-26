@@ -619,15 +619,21 @@ paths:
   /{tenant}/ai/conversations/{conversation}/messages:
     post:
       tags: [AI]
-      summary: Send a message and let the assistant act on it
+      summary: Send a message and queue an assistant turn
       description: |
-        The assistant may call tools in response. **Read** tools run immediately
-        so it has facts to reason with. **Write** tools never execute: each one
-        is persisted as a `pending` draft and returned for review, and the
-        journal is only created once the draft is approved.
+        Accepts a message and returns `202` immediately. The turn runs on the
+        queue because it spans several paid provider calls, so the user does not
+        wait and can leave the page; they come back to the drafts later.
 
-        The assistant is explicitly instructed to report a write as *proposed*
-        and never as done.
+        Within the turn, **read** tools run so the assistant has facts to reason
+        with, and **write** tools are only ever *proposed* as pending drafts.
+        Nothing is applied without an explicit approval.
+
+        A conversation with a turn already queued or running is refused with
+        `409`, so two turns cannot interleave one transcript.
+
+        **Requires a queue worker.** With none running the conversation stays
+        `queued` forever; `GET .../status` reports which state it is in.
       parameters:
         - name: conversation
           in: path
@@ -649,8 +655,8 @@ paths:
               example:
                 message: I spent 4.50 on coffee, paid with cash
       responses:
-        '200':
-          description: The reply and any drafts it proposed
+        '202':
+          description: Accepted and queued
           content:
             application/json:
               schema:
@@ -659,16 +665,49 @@ paths:
                   data:
                     type: object
                     properties:
-                      reply:
+                      status:
                         type: string
-                      drafts:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/AiActionDraft'
+                        enum: [queued, running, completed, failed]
+                      conversation_id:
+                        type: string
+                        format: uuid
+                      message_id:
+                        type: string
+                        format: uuid
+        '409':
+          description: A turn is already queued or running in this conversation
         '422':
           $ref: '#/components/responses/ValidationError'
-        '502':
-          description: The AI provider could not be reached or refused the request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/conversations/{conversation}/status:
+    get:
+      tags: [AI]
+      summary: Poll how far an assistant turn has got
+      description: |
+        A lightweight progress probe so a client can poll while a turn is in
+        flight without refetching the whole transcript. Stop polling once the
+        status is `completed` or `failed`, then read the conversation for the
+        drafts it produced.
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The turn status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiTurnStatus'
+        '404':
+          description: Conversation not found, or not owned by the caller
         '401':
           $ref: '#/components/responses/Unauthorized'
   /{tenant}/ai/drafts:
@@ -2410,6 +2449,27 @@ components:
         title:
           type: string
           nullable: true
+        status:
+          type: string
+          enum: [idle, queued, running, completed, failed]
+          description: |
+            Where the latest turn got to. `queued` that has not been picked up
+            yet means no queue worker is running.
+        error:
+          type: string
+          nullable: true
+        queued_at:
+          type: string
+          format: date-time
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
         pending_drafts_count:
           type: integer
           description: Proposed actions still awaiting a decision.
@@ -2419,6 +2479,33 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    AiTurnStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [idle, queued, running, completed, failed]
+        error:
+          type: string
+          nullable: true
+          description: |
+            A safe, user-facing sentence when the turn failed. Never the raw
+            provider response.
+        pending_drafts_count:
+          type: integer
+        queued_at:
+          type: string
+          format: date-time
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
 
     AiMessage:
       type: object

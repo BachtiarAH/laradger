@@ -103,6 +103,7 @@ Route::prefix('v1')->group(function () {
             Route::get('conversations', [AiAssistantController::class, 'conversations']);
             Route::post('conversations', [AiAssistantController::class, 'createConversation']);
             Route::get('conversations/{conversation}', [AiAssistantController::class, 'show']);
+            Route::get('conversations/{conversation}/status', [AiAssistantController::class, 'status']);
             Route::post('conversations/{conversation}/messages', [AiAssistantController::class, 'sendMessage']);
             Route::get('drafts', [AiAssistantController::class, 'drafts']);
             Route::patch('drafts/{draft}', [AiAssistantController::class, 'updateDraft']);

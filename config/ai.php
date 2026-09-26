@@ -86,6 +86,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Assistant Queue
+    |--------------------------------------------------------------------------
+    |
+    | An assistant turn spans several paid provider calls, so it runs on the
+    | queue: the user says what they want and comes back to the drafts later.
+    |
+    | This REQUIRES a worker. `composer run dev` already runs one; in
+    | production run `php artisan queue:work` (or Horizon). With no worker
+    | running, the conversation stays "queued" and never progresses.
+    |
+    */
+
+    'queue' => [
+        'name' => env('AI_QUEUE', 'default'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Call Recording
     |--------------------------------------------------------------------------
     |

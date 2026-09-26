@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\RunAiAssistantTurn;
 use App\Models\Account;
 use App\Models\AiActionDraft;
 use App\Models\AiConversation;
@@ -13,6 +14,7 @@ use App\Services\Ai\Tools\AiToolRegistry;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 
 /**
@@ -102,6 +104,63 @@ beforeEach(function () {
 });
 
 describe('proposing actions from a prompt', function () {
+    test('the turn is queued and nothing happens until a worker runs it', function () {
+        // The whole point of queueing: the request returns immediately and the
+        // ledger is untouched because no worker has run yet.
+        Queue::fake();
+
+        fakeToolCallingProvider([[
+            'id' => 'call_1',
+            'name' => 'journal_create',
+            'arguments' => [
+                'transaction_date' => '2026-08-17',
+                'description' => 'Coffee purchase',
+                'lines' => [
+                    ['account_id' => $this->coffee->id, 'debit' => '10.00'],
+                    ['account_id' => $this->cash->id, 'credit' => '10.00'],
+                ],
+            ],
+        ]]);
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'I spent 10 on coffee',
+        ])->assertStatus(202)
+            ->assertJsonPath('data.status', AiConversation::STATUS_QUEUED);
+
+        Queue::assertPushed(RunAiAssistantTurn::class, fn ($job) => $job->conversationId === $conversation->id);
+
+        // Queued means queued: no model call, no draft, no journal.
+        Http::assertNothingSent();
+        expect(AiActionDraft::withoutGlobalScopes()->count())->toBe(0)
+            ->and(Journal::withoutGlobalScopes()->count())->toBe(0);
+
+        reenter($this->tenant);
+        expect($conversation->refresh()->status)->toBe(AiConversation::STATUS_QUEUED)
+            ->and($conversation->queued_at)->not->toBeNull();
+
+        // The user's own words are recorded up front, so the thread reads
+        // correctly even while the turn is still pending.
+        expect($conversation->messages()->where('role', AiMessage::ROLE_USER)->count())->toBe(1);
+    });
+
+    test('a second turn is refused while one is still in flight', function () {
+        Queue::fake();
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'first',
+        ])->assertStatus(202);
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'second',
+        ])->assertStatus(409);
+
+        Queue::assertPushed(RunAiAssistantTurn::class, 1);
+    });
+
     test('a write tool call becomes a pending draft and writes nothing', function () {
         fakeToolCallingProvider([[
             'id' => 'call_1',
@@ -118,25 +177,28 @@ describe('proposing actions from a prompt', function () {
 
         $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
 
-        $response = $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+        // The test environment runs the queue synchronously, so the turn is
+        // already finished by the time the response is asserted.
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
             'message' => 'I spent 10 on coffee',
-        ]);
+        ])->assertStatus(202)
+            ->assertJsonPath('data.status', AiConversation::STATUS_COMPLETED)
+            ->assertJsonPath('data.conversation_id', $conversation->id);
 
-        $response->assertOk()
-            ->assertJsonPath('data.drafts.0.tool', 'journal_create')
-            ->assertJsonPath('data.drafts.0.status', AiActionDraft::STATUS_PENDING)
-            ->assertJsonPath('data.drafts.0.kind', 'write');
+        reenter($this->tenant);
+        $draft = AiActionDraft::withoutGlobalScopes()->firstOrFail();
+
+        expect($draft->tool)->toBe('journal_create')
+            ->and($draft->kind)->toBe('write')
+            ->and($draft->status)->toBe(AiActionDraft::STATUS_PENDING)
+            ->and($draft->payload['description'])->toBe('Coffee purchase')
+            ->and($draft->payload['status'])->toBe('draft')
+            ->and($draft->payload['lines'])->toHaveCount(2)
+            ->and($draft->title)->toContain('Coffee purchase');
 
         // The whole point: nothing was written.
         expect(Journal::withoutGlobalScopes()->count())->toBe(0)
             ->and(DB::table('journal_lines')->count())->toBe(0);
-
-        reenter($this->tenant);
-        $draft = AiActionDraft::withoutGlobalScopes()->firstOrFail();
-        expect($draft->payload['description'])->toBe('Coffee purchase')
-            ->and($draft->payload['status'])->toBe('draft')
-            ->and($draft->payload['lines'])->toHaveCount(2)
-            ->and($draft->title)->toContain('Coffee purchase');
     });
 
     test('the model is told the action was only proposed', function () {
@@ -157,8 +219,14 @@ describe('proposing actions from a prompt', function () {
 
         $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
             'message' => 'I spent 10 on coffee',
-        ])->assertOk()
-            ->assertJsonPath('data.reply', 'I have prepared a draft for your review.');
+        ])->assertStatus(202);
+
+        reenter($this->tenant);
+        $reply = $conversation->messages()
+            ->where('role', AiMessage::ROLE_ASSISTANT)
+            ->whereNotNull('content')
+            ->firstOrFail();
+        expect($reply->content)->toBe('I have prepared a draft for your review.');
 
         // The tool_result fed back to the model must say "proposed", not "done".
         reenter($this->tenant);
@@ -180,13 +248,16 @@ describe('proposing actions from a prompt', function () {
 
         $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
             'message' => 'what asset accounts do I have?',
-        ])->assertOk()
-            ->assertJsonPath('data.drafts', [])
-            ->assertJsonPath('data.reply', 'You have one asset account, Cash.');
+        ])->assertStatus(202);
 
         expect(AiActionDraft::withoutGlobalScopes()->count())->toBe(0);
 
         reenter($this->tenant);
+        $reply = $conversation->messages()
+            ->where('role', AiMessage::ROLE_ASSISTANT)
+            ->whereNotNull('content')
+            ->firstOrFail();
+        expect($reply->content)->toBe('You have one asset account, Cash.');
         $toolTurn = $conversation->messages()->where('role', AiMessage::ROLE_TOOL)->firstOrFail();
         expect(json_decode($toolTurn->content, true)['accounts'][0]['name'])->toBe('Cash');
 
@@ -207,7 +278,7 @@ describe('proposing actions from a prompt', function () {
 
         $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
             'message' => 'find the coffee account',
-        ])->assertOk();
+        ])->assertStatus(202);
 
         expect(AiActionDraft::withoutGlobalScopes()->count())->toBe(0);
     });
@@ -219,7 +290,7 @@ describe('proposing actions from a prompt', function () {
 
         $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
             'message' => 'hello',
-        ])->assertOk();
+        ])->assertStatus(202);
 
         Http::assertSent(function ($request) {
             $tools = collect($request->data()['tools'] ?? [])->pluck('function.name');
@@ -243,9 +314,12 @@ describe('proposing actions from a prompt', function () {
 
         $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
             'message' => 'delete everything',
-        ])->assertStatus(500);
+        ])->assertStatus(202);
 
-        expect(Journal::withoutGlobalScopes()->count())->toBe(0)
+        // The turn fails, but still never writes anything.
+        reenter($this->tenant);
+        expect($conversation->refresh()->status)->toBe(AiConversation::STATUS_FAILED)
+            ->and(Journal::withoutGlobalScopes()->count())->toBe(0)
             ->and(AiActionDraft::withoutGlobalScopes()->count())->toBe(0);
     });
 

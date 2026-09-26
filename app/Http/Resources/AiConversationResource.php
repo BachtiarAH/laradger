@@ -19,6 +19,11 @@ class AiConversationResource extends JsonResource
         return [
             'id' => $this->id,
             'title' => $this->title,
+            'status' => $this->status ?? AiConversation::STATUS_IDLE,
+            'error' => $this->error,
+            'queued_at' => $this->queued_at?->toIso8601String(),
+            'started_at' => $this->started_at?->toIso8601String(),
+            'completed_at' => $this->completed_at?->toIso8601String(),
             'pending_drafts_count' => $this->pending_drafts_count ?? $this->pendingDrafts()->count(),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
