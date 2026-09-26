@@ -17,6 +17,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
@@ -59,7 +60,9 @@ class AiAssistantController extends Controller
             'data' => [
                 'conversation' => (new AiConversationResource($conversation->refresh()))->resolve(request()),
                 'messages' => AiMessageResource::collection($conversation->messages)->resolve(request()),
-                'drafts' => AiActionDraftResource::collection($conversation->drafts)->resolve(request()),
+                'drafts' => AiActionDraftResource::collection(
+                    $conversation->drafts()->with('dependencies')->get()
+                )->resolve(request()),
             ],
         ]);
     }
@@ -116,9 +119,41 @@ class AiAssistantController extends Controller
             'data' => [
                 'reply' => $outcome['reply'],
                 // Nothing has been applied. These are proposals awaiting review.
-                'drafts' => AiActionDraftResource::collection($outcome['drafts'])->resolve($request),
+                'drafts' => AiActionDraftResource::collection(
+                    $this->withDependencies($outcome['drafts'])
+                )->resolve($request),
+                // Non-null only when the turn deliberately proposed nothing, so the
+                // drawer can say "already recorded as JRN-x" rather than showing an
+                // empty turn with no explanation.
+                'outcome' => $outcome['drafts']->isEmpty() ? $outcome['outcome'] : null,
             ],
         ]);
+    }
+
+    /**
+     * Re-read the given drafts with their prerequisites attached, keeping order.
+     *
+     * The turn's drafts are collected in a plain collection as they are proposed,
+     * and the resolver attaches a dependency relation to the ones that have one —
+     * so the relation is present but only ever partially loaded. One query for the
+     * whole turn beats a lazy load per card.
+     *
+     * @param  Collection<int, AiActionDraft>  $drafts
+     * @return Collection<int, AiActionDraft>
+     */
+    private function withDependencies(Collection $drafts): Collection
+    {
+        if ($drafts->isEmpty()) {
+            return $drafts;
+        }
+
+        $loaded = AiActionDraft::query()
+            ->with('dependencies')
+            ->whereIn('id', $drafts->map(fn (AiActionDraft $draft) => $draft->getKey())->all())
+            ->get()
+            ->keyBy(fn (AiActionDraft $draft): string => $draft->getKey());
+
+        return $drafts->map(fn (AiActionDraft $draft): AiActionDraft => $loaded->get($draft->getKey()) ?? $draft);
     }
 
     public function drafts(Request $request): AnonymousResourceCollection
@@ -127,6 +162,7 @@ class AiAssistantController extends Controller
 
         return AiActionDraftResource::collection(
             AiActionDraft::query()
+                ->with('dependencies')
                 ->whereHas('conversation', fn ($query) => $query->where('user_id', $request->user()->getKey()))
                 ->when(filled($status), fn ($query) => $query->where('status', $status))
                 ->latest()
@@ -142,7 +178,7 @@ class AiAssistantController extends Controller
     ): AiActionDraftResource {
         $draft->update(['payload' => $request->validated('payload')]);
 
-        return new AiActionDraftResource($draft->refresh());
+        return new AiActionDraftResource($draft->refresh()->load('dependencies'));
     }
 
     public function executeDraft(string $tenant, Request $request, AiActionDraft $draft): JsonResponse
@@ -162,7 +198,7 @@ class AiAssistantController extends Controller
             return response()->json(['message' => $e->getMessage()], 409);
         }
 
-        return (new AiActionDraftResource($draft->refresh()))->response();
+        return (new AiActionDraftResource($draft->refresh()->load('dependencies')))->response();
     }
 
     public function rejectDraft(string $tenant, Request $request, AiActionDraft $draft): JsonResponse
@@ -175,7 +211,7 @@ class AiAssistantController extends Controller
             return response()->json(['message' => $e->getMessage()], 409);
         }
 
-        return (new AiActionDraftResource($draft->refresh()))->response();
+        return (new AiActionDraftResource($draft->refresh()->load('dependencies')))->response();
     }
 
     /**

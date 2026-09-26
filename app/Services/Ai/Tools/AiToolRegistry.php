@@ -9,6 +9,7 @@ use App\Services\Ai\Tools\Tools\AccountsSearchTool;
 use App\Services\Ai\Tools\Tools\JournalCreateTool;
 use App\Services\Ai\Tools\Tools\JournalsSearchTool;
 use App\Services\Ai\Tools\Tools\OverviewGetTool;
+use App\Services\Ai\Tools\Tools\RecordNoActionTool;
 use App\Services\Ai\Tools\Tools\TagCreateTool;
 use InvalidArgumentException;
 
@@ -36,6 +37,9 @@ class AiToolRegistry
         JournalCreateTool::class,
         AccountCreateTool::class,
         TagCreateTool::class,
+
+        // Outcomes — change nothing; they report that a turn proposed no drafts.
+        RecordNoActionTool::class,
     ];
 
     /**

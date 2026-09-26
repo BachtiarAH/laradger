@@ -64,9 +64,17 @@ class AiConversation extends Model
         return $this->belongsTo(User::class);
     }
 
+    /**
+     * Ids are ordered UUIDs, so `id` is the tiebreaker `created_at` cannot be.
+     * A whole turn — user, assistant, one tool result per call — is written
+     * inside the same second, and without this the transcript the user reads
+     * back is ordered arbitrarily within that second.
+     */
     public function messages(): HasMany
     {
-        return $this->hasMany(AiMessage::class, 'ai_conversation_id')->orderBy('created_at');
+        return $this->hasMany(AiMessage::class, 'ai_conversation_id')
+            ->orderBy('created_at')
+            ->orderBy('id');
     }
 
     public function drafts(): HasMany

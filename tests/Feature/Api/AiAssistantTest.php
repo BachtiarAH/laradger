@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\RunAiDraftRequest;
 use App\Models\Account;
 use App\Models\AiActionDraft;
 use App\Models\AiConversation;
@@ -13,8 +14,11 @@ use App\Services\Ai\Omni\SystemPromptBuilder;
 use App\Services\Ai\Tools\AiToolKind;
 use App\Services\Ai\Tools\AiToolRegistry;
 use App\Tenancy\TenantContext;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Sanctum;
 
 /**
@@ -277,6 +281,160 @@ describe('proposing actions from a prompt', function () {
     });
 });
 
+/**
+ * A provider reads messages positionally: the last one is the live turn and
+ * everything before it is context. Replaying a conversation in any other order
+ * does not degrade the answer, it replaces the question — the model continues
+ * from whichever turn happens to land last.
+ *
+ * `created_at` has second precision and a whole turn is written inside one
+ * second, so these set the timestamps apart explicitly. Without that, every row
+ * in a fast test shares a timestamp and the ordering is accidentally correct.
+ */
+function seedTurn(AiConversation $conversation, User $user, string $userText, string $assistantText, Carbon $at): void
+{
+    $asked = $conversation->messages()->create([
+        'user_id' => $user->id,
+        'role' => AiMessage::ROLE_USER,
+        'content' => $userText,
+    ]);
+    $asked->forceFill(['created_at' => $at])->save();
+
+    $answered = $conversation->messages()->create([
+        'user_id' => $user->id,
+        'role' => AiMessage::ROLE_ASSISTANT,
+        'content' => $assistantText,
+    ]);
+    $answered->forceFill(['created_at' => $at])->save();
+}
+
+/**
+ * The messages the provider was actually sent, minus the system prompt.
+ *
+ * @return array<int, string>
+ */
+function sentPrompts(): array
+{
+    $sent = null;
+
+    Http::assertSent(function ($request) use (&$sent) {
+        $sent ??= $request->data()['messages'];
+
+        return true;
+    });
+
+    return collect($sent)
+        ->reject(fn (array $message): bool => $message['role'] === 'system')
+        ->map(fn (array $message): string => (string) $message['content'])
+        ->values()
+        ->all();
+}
+
+describe('replaying the conversation', function () {
+    test('the whole thread arrives in order, oldest first and the new turn last', function () {
+        fakeToolCallingProvider([], 'Here is the summary you asked for.');
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+        // Seeding goes through the tenant scope, which is fail-closed without a
+        // context, so re-enter before writing rows rather than after the request.
+        reenter($this->tenant);
+
+        seedTurn($conversation, $this->user, 'What is my revenue this year?', 'Twelve million.', now()->subMinutes(5));
+        seedTurn($conversation, $this->user, 'And last month?', 'Three million.', now()->subMinutes(1));
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'Summarise all of it.',
+        ])->assertOk();
+
+        // The follow-up depends on the opening question being in the transcript,
+        // and the current prompt has to be the last thing the model sees.
+        expect(sentPrompts())->toBe([
+            'What is my revenue this year?',
+            'Twelve million.',
+            'And last month?',
+            'Three million.',
+            'Summarise all of it.',
+        ]);
+    });
+
+    test('the current prompt survives past the replay window', function () {
+        fakeToolCallingProvider([], 'Still here.');
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        // 25 prior turns is 50 rows, past the 40-row window. The window has to be
+        // the *tail*: taking the head drops what the user just typed, so the model
+        // answers a conversation the user already moved on from.
+        for ($i = 1; $i <= 25; $i++) {
+            seedTurn($conversation, $this->user, "old question {$i}", "old answer {$i}", now()->subMinutes(60 - $i));
+        }
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'THE CURRENT PROMPT',
+        ])->assertOk();
+
+        $prompts = sentPrompts();
+
+        expect($prompts)->toHaveCount(40)
+            ->and(end($prompts))->toBe('THE CURRENT PROMPT')
+            // Tail, not head: the oldest turns are the ones dropped.
+            ->and($prompts)->not->toContain('old question 1');
+    });
+
+    test('a tool turn is never replayed without the call that asked for it', function () {
+        fakeToolCallingProvider([], 'Understood.');
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+        reenter($this->tenant);
+
+        // A group that straddles the window boundary. Over 41 rows the 40-row
+        // window starts at row 2, so the tool result survives while the assistant
+        // turn that asked for it does not: a tool result with no preceding
+        // tool_calls, which the provider rejects as malformed.
+        $old = now()->subHour();
+        $call = $conversation->messages()->create([
+            'user_id' => $this->user->id,
+            'role' => AiMessage::ROLE_ASSISTANT,
+            'content' => null,
+            'tool_calls' => [[
+                'id' => 'call_cut',
+                'name' => 'overview_get',
+                'arguments' => [],
+            ]],
+        ]);
+        $call->forceFill(['created_at' => $old])->save();
+
+        $result = $conversation->messages()->create([
+            'user_id' => $this->user->id,
+            'role' => AiMessage::ROLE_TOOL,
+            'tool_call_id' => 'call_cut',
+            'content' => '{"revenue":"0"}',
+        ]);
+        $result->forceFill(['created_at' => $old])->save();
+
+        for ($i = 1; $i <= 19; $i++) {
+            seedTurn($conversation, $this->user, "question {$i}", "answer {$i}", now()->subMinutes(20 - $i));
+        }
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'carry on',
+        ])->assertOk();
+
+        $sent = null;
+        Http::assertSent(function ($request) use (&$sent) {
+            $sent ??= $request->data()['messages'];
+
+            return true;
+        });
+
+        $roles = collect($sent)->map(fn (array $message): string => $message['role'])->values()->all();
+
+        expect($roles)->not->toContain('tool')
+            ->and($roles[0])->toBe('system')
+            ->and(end($roles))->toBe('user');
+    });
+});
+
 describe('approving a draft', function () {
     test('executing a pending journal draft writes the journal and audits it', function () {
         $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
@@ -510,17 +668,180 @@ test('the registry exposes only known tools, with write tools kept separate', fu
     );
     $sorted = fn (array $names): array => collect($names)->sort()->values()->all();
 
-    expect($registry->all())->toHaveCount(7)
+    expect($registry->all())->toHaveCount(8)
         ->and($sorted($names($registry->ofKind(AiToolKind::Write))))
         ->toBe(['account_create', 'journal_create', 'tag_create'])
         ->and($sorted($names($registry->ofKind(AiToolKind::Read))))
-        ->toBe(['accounts_get', 'accounts_search', 'journals_search', 'overview_get']);
+        ->toBe(['accounts_get', 'accounts_search', 'journals_search', 'overview_get'])
+        // Outcome tools change nothing, so they must never appear in either list —
+        // that separation is the only thing stopping a declaration from becoming a
+        // reviewable draft.
+        ->and($sorted($names($registry->ofKind(AiToolKind::Outcome))))
+        ->toBe(['record_no_action']);
 
     foreach ($registry->all() as $tool) {
         expect($tool->name())->toMatch('/^[a-zA-Z0-9_-]+$/');
         expect($tool->parameters()['type'])->toBe('object');
         expect($tool->description())->not->toBe('');
     }
+});
+
+/**
+ * A turn that creates nothing has to be distinguishable from a turn that failed,
+ * or the UI reports a decision as an empty result. `record_no_action` is how the
+ * model says which one it was, and the reference is what makes "already recorded"
+ * actionable rather than merely true.
+ */
+describe('declaring that a turn proposed nothing', function () {
+    test('already_recorded is reported with the entry that holds the transaction', function () {
+        fakeToolCallingProvider([[
+            'id' => 'call_1',
+            'name' => 'record_no_action',
+            'arguments' => [
+                'outcome' => 'already_recorded',
+                'reason' => 'This QRIS payment is already recorded as JRN-2026-0002.',
+                'reference' => 'JRN-2026-0002',
+            ],
+        ]], 'This one is already in the ledger, so I did not create a second entry.');
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $response = $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'catat struk QRIS 10.000 ini',
+        ])->assertOk();
+
+        $response->assertJsonPath('data.drafts', [])
+            ->assertJsonPath('data.outcome.outcome', 'already_recorded')
+            ->assertJsonPath('data.outcome.reference', 'JRN-2026-0002')
+            ->assertJsonPath('data.outcome.reason', 'This QRIS payment is already recorded as JRN-2026-0002.');
+
+        reenter($this->tenant);
+
+        // Declaring nothing must not create anything to review.
+        expect(AiActionDraft::withoutGlobalScopes()->count())->toBe(0)
+            ->and(Journal::withoutGlobalScopes()->count())->toBe(0);
+    });
+
+    test('a declaration without a reference is refused, because it is not actionable', function () {
+        $tool = app(AiToolRegistry::class)->get('record_no_action');
+
+        expect(fn () => $tool->execute([
+            'outcome' => 'already_recorded',
+            'reason' => 'It is already recorded.',
+        ]))->toThrow(ValidationException::class);
+
+        // With one, the same declaration is accepted.
+        expect($tool->execute([
+            'outcome' => 'already_recorded',
+            'reason' => 'It is already recorded.',
+            'reference' => 'JRN-2026-0002',
+        ])['reference'])->toBe('JRN-2026-0002');
+    });
+
+    test('an outcome tool can never be approved as a draft', function () {
+        // The guard that makes Outcome safe: DraftExecutor only runs writes, so a
+        // declaration cannot be smuggled through the approval endpoint.
+        $outcome = app(AiToolRegistry::class)->get('record_no_action');
+        expect($outcome->kind())->toBe(AiToolKind::Outcome)
+            ->and($outcome->kind()->requiresApproval())->toBeFalse();
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        // Hand-build the draft a mis-registered tool would have produced, then try
+        // to approve it through the real endpoint.
+        $draft = $conversation->drafts()->create([
+            'user_id' => $this->user->id,
+            'tool' => 'record_no_action',
+            'kind' => 'write',
+            'title' => 'Smuggled outcome',
+            'status' => AiActionDraft::STATUS_PENDING,
+            'payload' => ['outcome' => 'already_recorded', 'reason' => 'x', 'reference' => 'JRN-1'],
+        ]);
+
+        $this->postJson("{$this->base}/ai/drafts/{$draft->id}/execute")
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Only write actions can be approved.');
+    });
+
+    test('the system prompt tells the model how to check for a duplicate', function () {
+        reenter($this->tenant);
+
+        $prompt = app(SystemPromptBuilder::class)->system()['content'];
+
+        // Without this the behaviour is improvised: the model once declined to
+        // double-book correctly with nothing in the prompt asking it to, while the
+        // rest of the prompt pushed it to propose regardless.
+        expect($prompt)->toContain('Do not record the same money twice')
+            ->and($prompt)->toContain('record_no_action')
+            ->and($prompt)->toContain('already_recorded')
+            // Draft entries are where approved AI drafts live, so a model told to
+            // check only "posted" would miss them and duplicate anyway.
+            ->and($prompt)->toContain('Search draft entries too');
+    });
+
+    test('the queued path persists the outcome on the request', function () {
+        Queue::fake();
+
+        $response = $this->postJson("{$this->base}/ai/draft-requests", [
+            'prompt' => 'catat struk QRIS 10.000 ini',
+        ])->assertStatus(202);
+
+        $id = $response->json('data.id');
+        expect($id)->not->toBeNull();
+
+        Queue::assertPushed(RunAiDraftRequest::class);
+    });
+});
+
+/**
+ * A model handed a tool result will describe things the tool never returned. It
+ * reported a journal as carrying two tags when it carried one, and the extra one
+ * was invented from the tag catalogue — which tells the user a category is
+ * already handled when it is not.
+ */
+test('journals_search returns the tags an entry actually carries', function () {
+    $journal = Journal::create([
+        'tenant_id' => $this->tenant->id,
+        'reference' => 'JRN-2026-0002',
+        'transaction_date' => '2026-09-26',
+        'description' => 'Bayar QRIS di Warung Makan JKS',
+        'status' => 'draft',
+        'source' => 'manual',
+    ]);
+    $journal->lines()->create([
+        'account_id' => $this->coffee->id,
+        'description' => 'makan',
+        'debit' => '10000.00',
+        'credit' => '0.00',
+    ]);
+    $journal->lines()->create([
+        'account_id' => $this->cash->id,
+        'description' => 'bayar',
+        'debit' => '0.00',
+        'credit' => '10000.00',
+    ]);
+
+    $vendor = Tag::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Warung Makan JKS',
+        'type' => 'vendor',
+    ]);
+    $journal->tags()->attach($vendor->id);
+
+    // The tool reads through the tenant scope, which is fail-closed with no context.
+    reenter($this->tenant);
+
+    $result = app(AiToolRegistry::class)->get('journals_search')->execute(['search' => 'QRIS']);
+    $entry = collect($result['journals'])->firstWhere('reference', 'JRN-2026-0002');
+
+    expect($entry)->not->toBeNull()
+        // Exactly what is attached — an empty or absent list is the only honest
+        // answer for an untagged entry.
+        ->and($entry['tags'])->toBe(['Warung Makan JKS']);
+
+    $untagged = app(AiToolRegistry::class)->get('journals_search')
+        ->execute(['search' => 'Tidak Ada']);
+    expect(collect($untagged['journals'])->firstWhere('reference', 'JRN-2026-0002'))->toBeNull();
 });
 
 /**

@@ -51,6 +51,8 @@ class SystemPromptBuilder
                 $this->chartOfAccounts(),
                 $this->tags(),
                 $this->hardRules(),
+                $this->duplicates(),
+                $this->grounding(),
                 $this->batching(),
                 $mode === self::MODE_DRAFTING ? $this->unattended() : null,
                 $this->primaryActions(),
@@ -72,13 +74,18 @@ class SystemPromptBuilder
         - If the instruction is ambiguous, pick the most ordinary bookkeeping
           reading, propose the draft anyway, and say in one line which
           interpretation you chose.
+        - The one exception to "propose anyway" is a transaction the ledger
+          already holds. Declining to double-book it is a decision, not a question:
+          call `record_no_action` with the existing reference and finish. Do not
+          ask whether to record it, and do not draft it a second time.
         - If no existing account fits, propose `account_create` in this same reply
           and reference the account as `pending:<name>` in the journal. Never guess
           an account id, and never pass a `draft_id` as one.
         - Every draft is reviewed by a human before anything is applied, so a
           stated assumption costs nothing while a question costs the whole turn.
-        - Drafts that depend on each other are approved in order: say which one
-          the user has to approve first.
+        - Drafts that depend on each other need no particular order from the
+          user: approving the one that matters applies the rest first. Name the
+          drafts you produced so the list reads as a set.
         PROMPT;
     }
 
@@ -176,6 +183,68 @@ class SystemPromptBuilder
     }
 
     /**
+     * Do not record the same money twice.
+     *
+     * This rule was missing entirely, and the model improvised one — it declined
+     * to re-record a transaction it had already found, which happened to be right,
+     * with nothing in the prompt telling it to do that or bounding how. Meanwhile
+     * the rest of the prompt pushes hard the other way ("without hesitation", "a
+     * draft they reject costs them nothing"), so the behaviour was luck rather than
+     * instruction and could have gone the other way on the next receipt.
+     *
+     * The reference matters as much as the check: "we did not double-book this" is
+     * only useful if the user is told which entry already holds it.
+     */
+    private function duplicates(): string
+    {
+        return <<<'PROMPT'
+        Do not record the same money twice:
+        - When what you are given identifies a specific transaction — a receipt, a
+          payment reference, a transfer or order number, an invoice — call
+          `journals_search` before drafting anything for it.
+        - If an entry already matches on amount and date and carries that same
+          reference in its description, it is the same transaction. Do not draft it
+          again. Call `record_no_action` with outcome "already_recorded" and the
+          existing entry's reference, then tell the user which entry already holds
+          it.
+        - Search draft entries too. An entry created from an approved draft has
+          status "draft", so looking only at posted entries will miss it and you
+          will propose a duplicate of something the user already approved.
+        - Two genuinely separate payments of the same amount are not duplicates.
+          They usually differ by date, reference, or counterparty — if those
+          differ, draft both.
+        - When you are unsure whether two entries are the same transaction, draft
+          it and say in one line what you compared. A duplicate draft costs the
+          user one click to reject; a silently dropped transaction costs them the
+          whole entry to enter again.
+        PROMPT;
+    }
+
+    /**
+     * Say only what was actually established.
+     *
+     * A model that has been handed a tool result will confidently describe things
+     * the tool never returned — it read a journal carrying one tag and reported
+     * two, one of which it had inferred from the tag catalogue. In bookkeeping the
+     * cost of that is not a wrong sentence: it is the user deciding a category is
+     * already handled when it is not.
+     */
+    private function grounding(): string
+    {
+        return <<<'PROMPT'
+        Only state what you actually know:
+        - Every fact you report about the ledger must come from a tool result in
+          this turn, or from the account and tag lists above. If a tool did not
+          return it, you do not know it.
+        - Do not describe an entry's accounts, amounts, or tags unless the result
+          you were given contains them. An empty list means it has none.
+        - OCR of a receipt is a reading, not a fact. Quote it as what the image
+          appears to say, and never smooth over a figure you are unsure of — say
+          which part you could not read.
+        PROMPT;
+    }
+
+    /**
      * A turn may propose many actions at once. The loop already handles any
      * number of tool calls, but without being told, a model tends to stop at
      * the first one and leave the rest of a list unrecorded.
@@ -220,7 +289,10 @@ class SystemPromptBuilder
            "beli", or name an amount with a context. If you are unsure whether
            it is worth recording, record it as a draft: the user reviews every
            one, so a draft they reject costs them nothing, while a transaction
-           you failed to propose is work they have to redo by hand.
+           you failed to propose is work they have to redo by hand. "Unsure
+           whether it is worth recording" is not the same as "this is already
+           recorded" — only a search proves the second, and then you propose
+           nothing on purpose.
         2. `tag_create` — the user named a category, vendor, or period worth
            repeating: groceries, BCA, monthly, urgent. Tag it yourself even if
            they did not ask, because tags are what make the entry findable
@@ -230,11 +302,13 @@ class SystemPromptBuilder
         How the two connect, since a proposed tag has no id yet:
         - Tag already exists → put its `id` in the journal's `tag_ids`.
         - Tag does not exist → call `tag_create`, then put its *name* in the
-          journal's `pending_tags`. The journal attaches it once the tag draft
-          is approved, so the user approves the tag first. Never put a
-          `draft_id` from a tool result into `tag_ids`; that is not a tag id.
-        - When you do this, tell the user to approve the tag draft before the
-          journal, otherwise they will try the wrong order first.
+           journal's `pending_tags`. The journal attaches it once the tag exists.
+           Never put a `draft_id` from a tool result into `tag_ids`; that is not
+           a tag id.
+        - You do not need to tell the user to approve these in any particular
+           order. Approving the journal applies whatever it depends on first, so
+           the one they want is the only one they have to click. Still say which
+           drafts the reply produced, and that a new tag or account comes with it.
 
         Proposing both is normal and expected, not overreach.
         PROMPT;
@@ -250,6 +324,8 @@ class SystemPromptBuilder
             ->sortBy(fn (AiTool $tool): int => in_array($tool->name(), self::PRIMARY_TOOLS, true) ? 0 : 1)
             ->values();
 
+        $outcomes = collect($this->tools->ofKind(AiToolKind::Outcome));
+
         $lines = [
             'Read tools run immediately and give you facts:',
             ...$reads->map(fn (AiTool $tool): string => '- '.$tool->name().': '.$tool->description())->all(),
@@ -257,6 +333,16 @@ class SystemPromptBuilder
             'Write tools do NOT take effect. They create a draft the user must review and approve:',
             ...$writes->map(fn (AiTool $tool): string => '- '.$tool->name().': '.$tool->description())->all(),
         ];
+
+        if ($outcomes->isNotEmpty()) {
+            $lines[] = '';
+            $lines[] = 'This tool changes nothing and creates no draft. It records why a turn '
+                .'produced none, which is how the user is told the difference between a '
+                .'decision and a failure:';
+            $lines = [...$lines, ...$outcomes->map(
+                fn (AiTool $tool): string => '- '.$tool->name().': '.$tool->description(),
+            )->all()];
+        }
 
         return implode("\n", $lines)."\n\n"
             .'After calling a write tool, say plainly that you have prepared a draft and are waiting '

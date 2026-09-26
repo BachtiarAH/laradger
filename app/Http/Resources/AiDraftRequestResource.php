@@ -23,6 +23,11 @@ class AiDraftRequestResource extends JsonResource
             'status' => $this->status,
             'error' => $this->error,
             'drafts_count' => $this->drafts_count,
+            // Set only when the turn deliberately proposed nothing, so the UI can
+            // report a decision instead of rendering an empty result as a failure.
+            'outcome' => $this->outcome,
+            'outcome_reason' => $this->outcome_reason,
+            'outcome_reference' => $this->outcome_reference,
             'queued_at' => $this->queued_at?->toIso8601String(),
             'started_at' => $this->started_at?->toIso8601String(),
             'completed_at' => $this->completed_at?->toIso8601String(),

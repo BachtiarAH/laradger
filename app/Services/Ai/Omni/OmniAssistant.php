@@ -39,6 +39,7 @@ class OmniAssistant
         private readonly AiGateway $gateway,
         private readonly AiToolRegistry $tools,
         private readonly SystemPromptBuilder $prompts,
+        private readonly DraftDependencyResolver $dependencies,
     ) {}
 
     /**
@@ -67,7 +68,7 @@ class OmniAssistant
      * conversation is created inside the job — so it passes the prompt and the
      * message becomes the first step of the turn.
      *
-     * @return array{reply: string, drafts: Collection<int, AiActionDraft>, reads: array<int, array<string, mixed>>}
+     * @return array{reply: string, drafts: Collection<int, AiActionDraft>, reads: array<int, array<string, mixed>>, outcome: array{outcome: string, reason: string, reference: string|null}|null}
      */
     public function respond(
         AiConversation $conversation,
@@ -83,6 +84,7 @@ class OmniAssistant
 
         $reads = [];
         $drafts = collect();
+        $declared = null;
 
         for ($turn = 0; $turn < self::MAX_TURNS; $turn++) {
             $response = $this->gateway->converse($messages, $options);
@@ -97,10 +99,16 @@ class OmniAssistant
             ]);
 
             if (! $response->hasToolCalls()) {
+                // After the loop, not per draft: the model may propose the journal
+                // before the tag it needs, so the pairing is only knowable once the
+                // turn has produced everything it is going to produce.
+                $this->dependencies->wire($drafts);
+
                 return [
                     'reply' => $response->content,
                     'drafts' => $drafts,
                     'reads' => $reads,
+                    'outcome' => $declared,
                 ];
             }
 
@@ -121,6 +129,12 @@ class OmniAssistant
 
                 if ($outcome['read'] !== null) {
                     $reads[] = $outcome['read'];
+                }
+
+                // Last declaration wins, so a model that corrects itself mid-turn
+                // is not reported as two contradictory outcomes.
+                if ($outcome['declared'] !== null) {
+                    $declared = $outcome['declared'];
                 }
 
                 $conversation->messages()->create([
@@ -148,25 +162,51 @@ class OmniAssistant
             'content' => $note,
         ]);
 
-        return ['reply' => $note, 'drafts' => $drafts, 'reads' => $reads];
+        $this->dependencies->wire($drafts);
+
+        return ['reply' => $note, 'drafts' => $drafts, 'reads' => $reads, 'outcome' => $declared];
     }
 
     /**
-     * Route one tool call: read it now, or persist it as a draft.
+     * Route one tool call: read it now, persist it as a draft, or take its word
+     * for what the turn concluded.
      *
-     * @return array{draft: AiActionDraft|null, read: array<string, mixed>|null, content: string}
+     * @return array{draft: AiActionDraft|null, read: array<string, mixed>|null, content: string, declared: array{outcome: string, reason: string, reference: string|null}|null}
      */
     private function handle(ToolCall $call, AiConversation $conversation, AiMessage $message): array
     {
         $tool = $this->tools->get($call->name);
 
-        return $tool->kind() === AiToolKind::Read
-            ? $this->runRead($tool, $call)
-            : $this->proposeWrite($tool, $call, $conversation, $message);
+        return match ($tool->kind()) {
+            AiToolKind::Read => $this->runRead($tool, $call),
+            AiToolKind::Write => $this->proposeWrite($tool, $call, $conversation, $message),
+            // Changes nothing, so it runs inline — but it is not a read: it is a
+            // declaration, and it is the only path that can set the turn's outcome.
+            AiToolKind::Outcome => $this->declareNoAction($tool, $call),
+        };
     }
 
     /**
-     * @return array{draft: null, read: array<string, mixed>, content: string}
+     * @return array{draft: null, read: null, content: string, declared: array{outcome: string, reason: string, reference: string|null}}
+     */
+    private function declareNoAction(AiTool $tool, ToolCall $call): array
+    {
+        $result = $tool->execute($call->arguments);
+
+        return [
+            'draft' => null,
+            'read' => null,
+            'content' => $this->encode($result),
+            'declared' => [
+                'outcome' => (string) $result['outcome'],
+                'reason' => (string) $result['reason'],
+                'reference' => $result['reference'] ?? null,
+            ],
+        ];
+    }
+
+    /**
+     * @return array{draft: null, read: array<string, mixed>, content: string, declared: null}
      */
     private function runRead(AiTool $tool, ToolCall $call): array
     {
@@ -177,11 +217,12 @@ class OmniAssistant
             'read' => ['tool' => $tool->name(), 'result' => $result],
             // A tool_result is the model's only view of what happened.
             'content' => $this->encode($result),
+            'declared' => null,
         ];
     }
 
     /**
-     * @return array{draft: AiActionDraft, read: null, content: string}
+     * @return array{draft: AiActionDraft, read: null, content: string, declared: null}
      */
     private function proposeWrite(
         AiTool $tool,
@@ -208,6 +249,7 @@ class OmniAssistant
         return [
             'draft' => $draft,
             'read' => null,
+            'declared' => null,
             // State plainly that it is *proposed*, so the model neither reports
             // success nor plans follow-ups as if the money already moved.
             'content' => $this->encode([
@@ -228,11 +270,42 @@ class OmniAssistant
     {
         $messages = [$this->prompts->system($mode)];
 
+        // reorder(), not orderByDesc(): the relation already carries
+        // `orderBy('created_at')`, and Eloquent *appends* to it, so the query
+        // became `ORDER BY created_at ASC, id DESC` — the oldest 40 rows, and
+        // within a turn (written in the same second) newest-first. The
+        // ->reverse() then flipped the whole collection. A provider reads
+        // messages positionally, so that handed the model the conversation
+        // backwards: the turn the user just sent landed first and the very first
+        // prompt landed last, right where the model continues from. Past the
+        // limit it was worse — the current prompt was cut from the request
+        // entirely, leaving only the opening turns.
+        //
+        // Ids are ordered UUIDs (HasUuids), so they sort in insertion order and
+        // the window is the newest 40 rows, replayed oldest-first.
+        //
+        // ->values() is load-bearing: ->reverse() keeps the original keys, so
+        // without it the key-based lookup below counts from the wrong end and
+        // slices off the start of the conversation instead of the orphans.
         $stored = $conversation->messages()
-            ->orderByDesc('id')
+            ->reorder('id', 'desc')
             ->limit(self::HISTORY_LIMIT)
             ->get()
-            ->reverse();
+            ->reverse()
+            ->values();
+
+        // The window can start in the middle of a tool group, leaving tool turns
+        // whose assistant parent was cut. A provider rejects a tool result with
+        // no preceding tool_calls as malformed, so the orphans are dropped rather
+        // than sent. Replaying the parent turn instead would be better, but the
+        // assistant turn that introduced these calls is far older than the window.
+        $firstUsable = $stored->search(
+            static fn (AiMessage $message): bool => $message->role !== AiMessage::ROLE_TOOL,
+        );
+
+        if ($firstUsable !== false) {
+            $stored = $stored->slice($firstUsable);
+        }
 
         foreach ($stored as $message) {
             $entry = [

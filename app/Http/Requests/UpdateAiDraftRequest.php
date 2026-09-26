@@ -25,8 +25,11 @@ class UpdateAiDraftRequest extends FormRequest
             404,
         );
 
-        // Editing is only meaningful while the draft is still unsettled.
-        abort_unless($draft->isPending(), 409, 'This draft has already been settled.');
+        // Editing is meaningful while the draft is still correctable. A failed
+        // draft counts: it is normally failed *because* the payload is wrong
+        // (unbalanced lines, a reference that cannot be resolved), and a draft you
+        // cannot correct is a draft you can only throw away and ask for again.
+        abort_unless($draft->isEditable(), 409, 'This draft has already been settled.');
 
         return true;
     }

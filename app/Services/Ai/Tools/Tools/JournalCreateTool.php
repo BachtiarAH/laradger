@@ -93,8 +93,8 @@ class JournalCreateTool extends AbstractAiTool
                     'type' => 'array',
                     'items' => ['type' => 'string', 'maxLength' => 255],
                     'description' => 'Names of tags you are proposing with tag_create in this same reply. '
-                        .'They are attached once that tag exists, so the user approves the tag first. '
-                        .'Use this instead of tag_ids for a tag that does not exist yet.',
+                        .'They are attached once that tag exists, which happens as part of approving this '
+                        .'journal. Use this instead of tag_ids for a tag that does not exist yet.',
                 ],
             ],
             'required' => ['transaction_date', 'description', 'lines'],
@@ -200,14 +200,47 @@ class JournalCreateTool extends AbstractAiTool
 
     /**
      * A tag the assistant proposed is still a draft, so it has no id the journal
-     * could reference. Resolving by name at approval time is what lets the two
-     * be proposed together: the user approves the tag, then the journal, and the
-     * journal attaches it. One draft never executes another, so the ordering is
-     * a thing the user does, not a thing that happens behind their back.
+     * could reference. Resolving by name at approval time is what lets the two be
+     * proposed together: DraftExecutor runs the tag first, in the same transaction
+     * and from the same click, so by the time this resolves the tag exists.
      *
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
      */
+
+    /**
+     * What this draft is waiting on, by name, when the thing does not exist yet.
+     *
+     * This is what the assistant turns into a real dependency row, so the executor
+     * can order the chain and the review card can say what a draft is waiting on. A
+     * name is checked against the ledger here rather than at approval time because
+     * a reference to a tag that already exists is not a dependency at all — it
+     * would demand approving a draft for something that is already there.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<int, array{tool: string, name: string}>
+     */
+    public function pendingReferences(array $payload): array
+    {
+        $references = [];
+
+        foreach ($this->pendingTagNames($payload) as $name) {
+            if (! Tag::query()->where('name', $name)->exists()) {
+                $references[] = ['tool' => 'tag_create', 'name' => $name];
+            }
+        }
+
+        foreach ($this->pendingAccountNames($payload) as $name) {
+            $exists = Account::query()->where('name', $name)->where('is_header', false)->exists();
+
+            if (! $exists) {
+                $references[] = ['tool' => 'account_create', 'name' => $name];
+            }
+        }
+
+        return $references;
+    }
+
     public function execute(array $arguments): array
     {
         $payload = $this->payload($arguments);
@@ -287,6 +320,37 @@ class JournalCreateTool extends AbstractAiTool
         }
 
         return $ids;
+    }
+
+    /**
+     * Account names this journal references that are not accounts yet.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<int, string>
+     */
+    private function pendingAccountNames(array $payload): array
+    {
+        $names = [];
+
+        foreach ((array) ($payload['lines'] ?? []) as $line) {
+            if (! is_array($line)) {
+                continue;
+            }
+
+            $reference = (string) ($line['account_id'] ?? '');
+
+            if (! str_starts_with($reference, self::PENDING_PREFIX)) {
+                continue;
+            }
+
+            $name = trim(substr($reference, strlen(self::PENDING_PREFIX)));
+
+            if ($name !== '') {
+                $names[$name] = $name;
+            }
+        }
+
+        return array_values($names);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Services\Ai\Omni\TurnOutcome;
 use Database\Factories\AiDraftRequestFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -40,6 +41,9 @@ class AiDraftRequest extends Model
         'status',
         'error',
         'drafts_count',
+        'outcome',
+        'outcome_reason',
+        'outcome_reference',
         'queued_at',
         'started_at',
         'completed_at',
@@ -73,5 +77,25 @@ class AiDraftRequest extends Model
     public function isSettled(): bool
     {
         return ! in_array($this->status, [self::STATUS_QUEUED, self::STATUS_RUNNING], true);
+    }
+
+    public function turnOutcome(): ?TurnOutcome
+    {
+        return $this->outcome === null ? null : TurnOutcome::tryFrom($this->outcome);
+    }
+
+    /**
+     * True when the turn finished and deliberately proposed nothing, as opposed to
+     * having produced nothing to show for it.
+     *
+     * The UI branches on this to choose between reporting a decision and reporting
+     * a failure, so it is deliberately strict: a draft means there is no outcome to
+     * report, and an unrecognised value is not treated as a decision.
+     */
+    public function declined(): bool
+    {
+        return $this->status === self::STATUS_COMPLETED
+            && $this->drafts_count === 0
+            && $this->turnOutcome() !== null;
     }
 }

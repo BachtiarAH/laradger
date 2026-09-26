@@ -111,6 +111,11 @@ class RunAiDraftRequest implements ShouldQueue
             $request->forceFill([
                 'status' => AiDraftRequest::STATUS_COMPLETED,
                 'drafts_count' => $outcome['drafts']->count(),
+                // Only meaningful when nothing was drafted. Left null otherwise,
+                // so "produced drafts" needs no outcome value to explain itself.
+                'outcome' => $outcome['drafts']->isEmpty() ? $outcome['outcome']['outcome'] ?? null : null,
+                'outcome_reason' => $outcome['drafts']->isEmpty() ? $outcome['outcome']['reason'] ?? null : null,
+                'outcome_reference' => $outcome['drafts']->isEmpty() ? $outcome['outcome']['reference'] ?? null : null,
                 // Kept so an answer the model had to give is not buried in a
                 // transcript the user never opens.
                 'reply' => $outcome['reply'],

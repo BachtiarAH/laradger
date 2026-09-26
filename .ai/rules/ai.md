@@ -8,6 +8,7 @@ paths:
   - 'app/Models/AiConversation.php'
   - 'app/Models/AiMessage.php'
   - 'app/Models/AiActionDraft.php'
+  - 'tests/Feature/Api/AiAssistantTest.php'
 ---
 
 # AI Service Architecture
@@ -132,6 +133,20 @@ user reviews → DraftExecutor → real FormRequest → real controller
 - The `tool_result` returned to the model says `status: proposed` and
   "NOT been applied" — otherwise the model reports the money as already moved.
 
+### A proposed action is in the drafter the moment it is proposed
+
+`proposeWrite()` writes the `ai_action_drafts` row inside the turn, so a built
+action is **already** in the drafter by the time the reply reaches the user. There
+is no second step, no queue, and no "save draft" call to add later — the assistant
+and the queued path write to the same table, which is why `/ai/drafts` is the one
+screen that lists everything pending.
+
+What the assistant owes the user is only the *telling*: `AssistantDrawer` says how
+many actions were added and links to `/ai/drafts`, and calls the shared
+`refreshPendingBadge()`. That badge is otherwise only corrected by its own 60s
+timer, and a stale count next to a just-built action is indistinguishable from
+"nothing happened" — the one thing the turn must not communicate.
+
 ## Tool names are underscored, not dotted
 
 Both OpenAI and Anthropic restrict function names to `^[a-zA-Z0-9_-]+$`, so
@@ -207,13 +222,46 @@ The model gets ids from two places only:
   `lines[].account_id`, and `pending_tags` (names) on `journal_create`.
 
 `JournalCreateTool::payload()` stores the reference **unresolved** so the review
-card shows what was proposed and reviewed still equals sent;
-`execute()` resolves it and throws a `ValidationException` naming the tag or
-account and telling the user to approve it first. One draft never executes
-another, so approval order is the user's job — do not chain them.
-
-When adding a write tool that produces something another write tool must point
+card shows what was proposed and reviewed still equals sent; `execute()` resolves
+it. When adding a write tool that produces something another write tool must point
 at, follow this pattern rather than inventing a placeholder id.
+
+### The pairing is also a real row, and the executor walks it
+
+The name in the payload is what the user reads; it is not something an executor can
+order. `pendingReferences()` on the tool declares the outstanding names, and
+`DraftDependencyResolver` pairs them with sibling drafts into
+`ai_action_draft_dependencies` (composite key, no surrogate id). Wired at the
+**end** of the turn, not per draft — the model may propose the journal before the
+tag, and a per-draft implementation misses exactly that. A name that already
+exists in the ledger is not a dependency at all; recording one would demand
+approving a draft for something already there.
+
+Approving a draft runs its chain, dependencies first, in one transaction. This
+replaced "one draft never executes another, so approval order is the user's job",
+and it is worth remembering why that rule was wrong rather than just that it
+changed. It protected the right invariant — the model never causes a write — but
+the ordering it demanded was invisible (a string in a payload, nothing on the
+card) and getting it wrong was **terminal**: the failure marked the draft
+`failed`, and `failed` was neither editable nor retryable, so the only recovery was
+throwing the draft away and asking the assistant for the same thing again. Chaining
+weakens nothing that matters — every step still runs through its own tool into the
+real FormRequest and controller, and it all still starts from one explicit click.
+
+Three rules the chain obeys, each of which was a bug once:
+
+- **All or nothing.** One transaction. On failure only the step that failed is
+  marked; the ones before it were rolled back, so they stay `pending` and a retry
+  re-runs the whole chain rather than tripping over a half-applied one.
+- **A rejected or failed prerequisite blocks the chain** and the error says to edit
+  the reference out. Silently continuing without the tag would mean applying
+  something other than what was reviewed. An `executed` prerequisite is skipped
+  instead, so approving the tag by hand first still works.
+- **`failed` is editable and retryable; `executed` and `rejected` are not.** The
+  executor wraps each run in a transaction, so a failure left nothing behind and
+  re-running is safe — while re-running an applied draft is the double-posting
+  `isExecutable()` exists to prevent. `AiActionDraft::isEditable()` and
+  `isExecutable()` encode this; do not collapse them back into `isPending()`.
 
 ## Chat is synchronous; drafting is queued
 
@@ -267,6 +315,38 @@ they own separate conversations.
 provider rejects the request as malformed. `OmniAssistant::history()` therefore
 replays stored `tool` turns; do not "clean them up".
 
+## Replay the tail, in order, or the assistant answers the wrong question
+
+A provider reads `messages` **positionally**. The last one is the live turn;
+everything before it is context. So a replay that is merely *reordered* does not
+degrade the answer, it **replaces the question** — the model continues from
+whichever turn happens to land last. There was no test for this, so it shipped.
+
+Three traps, all in `OmniAssistant::history()`, all live at once:
+
+- **The relation already carries an order.** `AiConversation::messages()` ends
+  in `orderBy('created_at')`, and Eloquent *appends* to it. `->orderByDesc('id')`
+  on top of that compiles to `ORDER BY created_at ASC, id DESC`, so `->limit(40)`
+  took the **oldest** 40 rows and the current prompt was never sent at all. Use
+  `reorder()`, never `orderBy*`, when you mean to replace an inherited order.
+- **`created_at` cannot order a turn.** It has second precision and a whole turn
+  (user, assistant, one tool result per call) is written inside one second. The
+  relation therefore also orders by `id`; ids are ordered UUIDs (`HasUuids`), so
+  they sort in insertion order and are the only trustworthy sequence here.
+- **`reverse()` preserves keys.** `Collection::search()` returns a *key*, so
+  after `->reverse()` a key-based `slice()` counts from the wrong end and cuts
+  the start of the conversation. `->values()` after `->reverse()`.
+
+The window is a tail, so it can start mid-group and orphan a `tool` turn whose
+assistant parent was cut. Those are dropped rather than sent, because a provider
+rejects a tool result with no preceding `tool_calls` as malformed and the whole
+turn is lost. `AiAssistantTest`'s `replaying the conversation` group pins all of
+it — including that the current prompt is the **last** message sent.
+
+A transcript the user reads back and a transcript the model reads back come from
+different queries, so they can disagree invisibly. Assert on what was *sent*
+(`Http::assertSent`), not on what was stored.
+
 Conversations and drafts are **personal**, not tenant-wide: another member of the
 same tenant gets `404`, never `403`, so existence is not disclosed. The
 ownership check for `PATCH /ai/drafts/{draft}` lives in the FormRequest's
@@ -278,6 +358,64 @@ Anthropic specifics: no `tool` role (a tool result is a user turn holding
 `system` is hoisted out of `messages`, and consecutive same-role turns are
 rejected so user turns get merged. A missing `type` on a content block is
 tolerated, because proxies fronting an Anthropic-compatible model omit it.
+
+## `max:4000` is shared with a client-side budget, do not raise one side
+
+`SendAiMessageRequest` and `StoreAiDraftRequest` both cap a prompt at 4000
+characters. The assistant drawer and the AI Drafts page compose their prompts in
+`laradger-web/src/lib/receiptPrompt.ts`, which holds the same number and spends it
+on receipt OCR text. The two are not independent: raise one and the client starts
+sending prompts the server rejects, and the failure only appears as a 422 *after*
+the user has already waited through an OCR run.
+
+Receipts are read in the browser and never uploaded, so a prompt is plain text by
+the time it arrives here — there is no attachment column, no storage, and no
+multipart body anywhere in the AI API. Do not add one to "support" receipts; the
+attachment is the OCR text, and it is in the prompt already.
+
+The budget has two rules worth keeping: the user's own words are never truncated
+in preference to a receipt, and a receipt that cannot fit is either cut with a
+visible marker or announced as dropped — never silently omitted, because the
+number that gets silently dropped is a total.
+
+## A turn that proposes nothing must say why
+
+`drafts_count === 0` meant two opposite things at once: the model correctly
+declined to double-book a transaction, or the model gave up. Both rendered as an
+empty result, and the UI told the user to go ask the assistant about a turn the
+assistant had already answered in a collapsed panel. A correct decision was
+indistinguishable from a failure, and the reference that would have made it
+actionable went nowhere.
+
+`AiToolKind` therefore has a third case, `Outcome`, and one tool,
+`record_no_action`. It changes nothing and never becomes a draft — `DraftExecutor`
+runs `Write` only, which is the whole reason `Outcome` is not `Write`. The model
+declares `already_recorded` (with the existing entry's reference),
+`nothing_to_record`, or `needs_attention`; the job stamps it onto
+`ai_draft_request`, exactly as it stamps `ai_draft_request_id` onto drafts,
+because the assistant is shared with the chat path and has no request to write to.
+`outcome` is null whenever drafts were produced — that case needs no explanation.
+
+Two rules the prompt was missing, both added because the model improvised around
+their absence and was one bad roll away from improvising wrong:
+
+- **Duplicates.** Nothing told the model to check before drafting, while
+  `primaryActions` told it to reach for `journal_create` "without hesitation" and
+  `unattended` told it never to stop and ask. So it either double-books or
+  unilaterally decides, and which one you get is luck. `duplicates()` bounds the
+  check to inputs that identify a transaction and requires the reference. Note
+  that an entry created from an approved draft has status `draft`: a model told to
+  search only `posted` misses it and duplicates something already approved.
+- **Grounding.** The model reported a journal as carrying two tags when it
+  carried one, inventing the second from the tag catalogue — which tells the user
+  a category is handled when it is not. `journals_search` now returns the tags an
+  entry actually has, and `grounding()` forbids stating ledger facts that no tool
+  result contained.
+
+`unattended()` says never to end on a question, so a deliberate refusal has to be
+expressible as a decision. That is why `record_no_action` exists rather than a
+prompt instruction to "mention it in your reply" — prose in a reply is not
+something a screen can branch on.
 
 ## Behavior to preserve
 
