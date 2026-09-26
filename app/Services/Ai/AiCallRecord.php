@@ -19,7 +19,7 @@ class AiCallRecord implements Arrayable
         public ?string $tenant_id,
         public string $provider,
         public string $model,
-        public string $statement,
+        public ?string $statement,
         public string $prompt,
         public ?array $draft,
         public ?array $raw_response,
@@ -35,7 +35,7 @@ class AiCallRecord implements Arrayable
         string $model,
         ?string $user_id,
         ?string $tenant_id,
-        string $statement,
+        ?string $statement,
         string $prompt,
     ): self {
         return new self(

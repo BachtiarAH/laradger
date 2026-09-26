@@ -13,8 +13,8 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'is_admin', 'status'])]
-#[Hidden(['password', 'remember_token'])]
+#[Fillable(['name', 'email', 'password', 'is_admin', 'status', 'ai_provider', 'ai_model', 'ai_api_key', 'ai_base_uri', 'ai_endpoint'])]
+#[Hidden(['password', 'remember_token', 'ai_api_key'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -43,12 +43,31 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_admin' => 'boolean',
             'status' => UserStatus::class,
+            'ai_api_key' => 'encrypted',
         ];
     }
 
     public function isAdmin(): bool
     {
         return $this->is_admin;
+    }
+
+    /**
+     * Whether the user stored their own AI provider API key in-app. When false
+     * the AI gateway falls back to the environment configuration.
+     */
+    public function hasAiApiKey(): bool
+    {
+        return filled($this->ai_api_key);
+    }
+
+    /**
+     * The provider this user selected in-app, if any. Null means the gateway
+     * keeps using the environment default.
+     */
+    public function aiProviderName(): ?string
+    {
+        return filled($this->ai_provider) ? (string) $this->ai_provider : null;
     }
 
     /**

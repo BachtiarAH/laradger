@@ -137,6 +137,55 @@ describe('ai draft generation', function () {
             ->assertJsonValidationErrors(['statement']);
     });
 
+    test('returns 502 when the provider returns text instead of json', function () {
+        Http::fake([
+            'https://api.openai.com/*' => Http::response([
+                'choices' => [
+                    ['message' => ['content' => 'Sure! Here is your journal entry.']],
+                ],
+            ]),
+        ]);
+
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
+            'statement' => 'Spent $10 on coffee',
+        ])->assertStatus(502)
+            ->assertJsonValidationErrors(['statement'])
+            ->assertJsonPath(
+                'errors.statement.0',
+                'The AI provider returned a response that was not valid JSON.',
+            );
+    });
+
+    test('accepts a draft wrapped in a markdown code fence', function () {
+        // Small self-hosted models served over the openai_compatible path
+        // routinely fence their JSON even when told not to.
+        Http::fake([
+            'https://api.openai.com/*' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => "```json\n".json_encode([
+                                'draft' => [
+                                    'transaction_date' => '2026-08-17',
+                                    'description' => 'Fenced draft',
+                                    'lines' => [
+                                        ['account_name' => 'Coffee', 'account_type' => 'expense', 'debit' => '10.00', 'credit' => null],
+                                        ['account_name' => 'Cash', 'account_type' => 'asset', 'debit' => null, 'credit' => '10.00'],
+                                    ],
+                                ],
+                            ])."\n```",
+                        ],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $this->postJson("/api/v1/{$this->tenant->slug}/journals/ai-draft", [
+            'statement' => 'Spent $10 on coffee',
+        ])->assertOk()
+            ->assertJsonPath('data.description', 'Fenced draft');
+    });
+
     test('falls back to the anthropic provider when openai fails', function () {
         config(['ai.providers.anthropic.api_key' => 'test-anthropic-key']);
 

@@ -33,5 +33,11 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('register', function (Request $request) {
             return Limit::perMinute(5)->by($request->ip());
         });
+
+        // AI endpoints spend the user's own money per call, so they are capped
+        // per authenticated user rather than per IP.
+        RateLimiter::for('ai', function (Request $request) {
+            return Limit::perMinute(30)->by((string) ($request->user()?->getKey() ?? $request->ip()));
+        });
     }
 }

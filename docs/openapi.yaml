@@ -102,6 +102,8 @@ tags:
     description: Read-only audit trail
   - name: Tenants
     description: List the tenants a user belongs to
+  - name: AI
+    description: Personal AI provider settings and the assistant that proposes actions
   - name: Docs
     description: OpenAPI specification endpoint
   - name: Admin
@@ -338,6 +340,469 @@ paths:
                 properties:
                   message:
                     type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /me/ai:
+    get:
+      tags: [AI]
+      summary: Show the authenticated user's AI provider settings
+      description: |
+        Returns the user's personal AI provider selection, plus every registered
+        provider so a client can render a selector without hardcoding names.
+
+        The stored API key is **never** included in the response. Only
+        `has_key` and a `key_hint` holding the last four characters of the
+        user's own key are exposed. A key configured on the server
+        (`AI_*_API_KEY`) is reported as `source: environment` and is not
+        partially disclosed.
+
+        This endpoint is not tenant-scoped: the key belongs to the user, who may
+        belong to several tenants.
+      responses:
+        '200':
+          description: The user's AI settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [AI]
+      summary: Store the authenticated user's AI provider settings
+      description: |
+        Stores the provider and model the user selected, and optionally the API
+        key. The key is encrypted at rest with the application key.
+
+        Omitting `api_key` — or sending it blank — **keeps** the stored key, so
+        saving a different model never wipes a key the user cannot see. Use
+        `DELETE /me/ai` to clear it.
+
+        A stored key only applies to the provider the user selected; other
+        providers keep their environment configuration, so gateway fallback
+        across providers keeps working.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  enum: [openai, anthropic, openai_compatible]
+                model:
+                  type: string
+                  nullable: true
+                  maxLength: 191
+                api_key:
+                  type: string
+                  nullable: true
+                  description: Omit or blank to keep the currently stored key.
+                base_uri:
+                  type: string
+                  nullable: true
+                  pattern: '^https?://'
+                  maxLength: 255
+                  description: |
+                    Custom base URL, primarily for `openai_compatible`
+                    (Ollama, vLLM, LM Studio, OpenRouter, ...). Omit or blank to
+                    keep the stored value; `DELETE /me/ai` clears it.
+                endpoint:
+                  type: string
+                  nullable: true
+                  pattern: '^/[^:]*$'
+                  maxLength: 255
+                  description: |
+                    Chat-completions path appended to `base_uri`. Must start with
+                    `/` and must not carry a scheme. Omit or blank to keep the
+                    stored value.
+              example:
+                provider: openai_compatible
+                model: llama3.1
+                api_key: ollama
+                base_uri: http://localhost:11434
+                endpoint: /v1/chat/completions
+      responses:
+        '200':
+          description: The stored settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiSettings'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [AI]
+      summary: Remove the stored AI API key and provider selection
+      description: |
+        Clears the user's stored key, model, and provider selection, returning
+        them to the environment configuration.
+      responses:
+        '200':
+          description: The settings after clearing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /me/ai/test:
+    post:
+      tags: [AI]
+      summary: Verify AI credentials against the provider
+      description: |
+        Sends a minimal completion to the provider to confirm the credentials
+        work. Every field is optional: an empty body tests the stored settings,
+        and any supplied value is used for the call only and is **never
+        persisted** — so a key can be pasted, tested, and only then committed.
+
+        Provider error details are never echoed back; failures return `422` with
+        a generic message on the `api_key` field.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  enum: [openai, anthropic, openai_compatible]
+                model:
+                  type: string
+                  nullable: true
+                api_key:
+                  type: string
+                  nullable: true
+                base_uri:
+                  type: string
+                  nullable: true
+                  pattern: '^https?://'
+                endpoint:
+                  type: string
+                  nullable: true
+                  pattern: '^/[^:]*$'
+              example:
+                provider: openai_compatible
+                api_key: ollama
+                base_uri: http://localhost:11434
+      responses:
+        '200':
+          description: The provider accepted the credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                      provider:
+                        type: string
+                      model:
+                        type: string
+                        nullable: true
+                      base_uri:
+                        type: string
+                        nullable: true
+                      latency_ms:
+                        type: integer
+        '422':
+          description: No key available, or the provider rejected the test
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    type: object
+                    properties:
+                      api_key:
+                        type: array
+                        items:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /{tenant}/ai/conversations:
+    get:
+      tags: [AI]
+      summary: List the authenticated user's assistant conversations
+      description: |
+        Conversations are **personal**: only the requesting user's own threads are
+        returned, even for a tenant they share with other members.
+      responses:
+        '200':
+          description: Conversations, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AiConversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [AI]
+      summary: Start a conversation
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiConversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/conversations/{conversation}:
+    get:
+      tags: [AI]
+      summary: Read a conversation with its messages and drafts
+      description: |
+        Returns `404` for a conversation owned by another user, so a member
+        cannot confirm the existence of someone else's thread.
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The conversation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      conversation:
+                        $ref: '#/components/schemas/AiConversation'
+                      messages:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AiMessage'
+                      drafts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AiActionDraft'
+        '404':
+          description: Conversation not found, or not owned by the caller
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/conversations/{conversation}/messages:
+    post:
+      tags: [AI]
+      summary: Send a message and let the assistant act on it
+      description: |
+        The assistant may call tools in response. **Read** tools run immediately
+        so it has facts to reason with. **Write** tools never execute: each one
+        is persisted as a `pending` draft and returned for review, and the
+        journal is only created once the draft is approved.
+
+        The assistant is explicitly instructed to report a write as *proposed*
+        and never as done.
+      parameters:
+        - name: conversation
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: string
+                  maxLength: 4000
+              example:
+                message: I spent 4.50 on coffee, paid with cash
+      responses:
+        '200':
+          description: The reply and any drafts it proposed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      reply:
+                        type: string
+                      drafts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AiActionDraft'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '502':
+          description: The AI provider could not be reached or refused the request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/drafts:
+    get:
+      tags: [AI]
+      summary: List the caller's proposed actions
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, executed, rejected, failed]
+      responses:
+        '200':
+          description: Drafts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AiActionDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/drafts/{draft}:
+    patch:
+      tags: [AI]
+      summary: Correct a draft's payload before approving it
+      description: |
+        Only `payload` is editable, and only while the draft is `pending`. The
+        `tool`, `kind`, and `title` are deliberately immutable: they describe
+        *which* action this is, and allowing them to change would let a review of
+        "create journal" turn into an execution of something else.
+      parameters:
+        - name: draft
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payload]
+              properties:
+                payload:
+                  type: object
+                  description: Exactly the body that will be sent on approval.
+      responses:
+        '200':
+          description: The updated draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiActionDraft'
+        '404':
+          description: Draft not found, or not owned by the caller
+        '409':
+          description: The draft has already been settled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/drafts/{draft}/execute:
+    post:
+      tags: [AI]
+      summary: Approve a draft and apply it
+      description: |
+        The only endpoint that causes a write tool to run. The action goes
+        through the same form request, policy, transaction, and audit logging as
+        the equivalent HTTP endpoint, so the assistant can never do anything the
+        approving user could not do by hand.
+
+        A settled draft cannot be replayed (`409`).
+      parameters:
+        - name: draft
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The executed draft, including what it created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiActionDraft'
+        '403':
+          description: The user is not allowed to perform the action
+        '404':
+          description: Draft not found, or not owned by the caller
+        '409':
+          description: The draft has already been settled
+        '422':
+          description: Validation failed; the draft is marked `failed` and the
+            field errors are returned so the payload can be corrected
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/drafts/{draft}/reject:
+    post:
+      tags: [AI]
+      summary: Discard a draft
+      parameters:
+        - name: draft
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The rejected draft
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiActionDraft'
+        '404':
+          description: Draft not found, or not owned by the caller
+        '409':
+          description: The draft has already been settled
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1871,6 +2336,159 @@ components:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+
+    AiSettings:
+      type: object
+      description: |
+        A user's personal AI provider settings. The stored API key is never
+        present in this object.
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic, openai_compatible]
+          description: The provider requests are routed to.
+        model:
+          type: string
+          nullable: true
+        base_uri:
+          type: string
+          nullable: true
+          description: |
+            The effective base URL the provider is called on. Only meaningful
+            for `openai_compatible`; the other providers have a fixed endpoint.
+            `http`/`https` only. Not a secret, so it is returned as-is.
+        endpoint:
+          type: string
+          nullable: true
+          description: |
+            The chat-completions path appended to `base_uri`. The two are
+            concatenated textually with no normalization, so
+            `http://localhost:11434` + `/v1/chat/completions` is correct while
+            `http://localhost:11434/v1` + `/v1/chat/completions` is not.
+        has_key:
+          type: boolean
+          description: Whether a usable key is available (personal or server-side).
+        key_hint:
+          type: string
+          nullable: true
+          description: |
+            The last four characters of the user's own stored key, e.g. `...a1b2`.
+            Null when the key comes from the server configuration.
+        source:
+          type: string
+          enum: [user, environment]
+          description: |
+            `user` when the personal in-app key is in use, `environment` when
+            falling back to the server configuration.
+        providers:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                enum: [openai, anthropic, openai_compatible]
+              label:
+                type: string
+              default_model:
+                type: string
+                nullable: true
+              configured:
+                type: boolean
+              source:
+                type: string
+                enum: [user, environment]
+
+    AiConversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          nullable: true
+        pending_drafts_count:
+          type: integer
+          description: Proposed actions still awaiting a decision.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AiMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, tool]
+        content:
+          type: string
+          nullable: true
+        tool_calls:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              arguments:
+                type: object
+        created_at:
+          type: string
+          format: date-time
+
+    AiActionDraft:
+      type: object
+      description: |
+        A proposed action. `pending` means nothing has been applied yet.
+      properties:
+        id:
+          type: string
+          format: uuid
+        tool:
+          type: string
+          description: The allow-listed tool name, e.g. `journal_create`.
+        kind:
+          type: string
+          enum: [read, write]
+        title:
+          type: string
+          description: Short human summary shown on the review card.
+        status:
+          type: string
+          enum: [pending, executed, rejected, failed]
+        payload:
+          type: object
+          description: |
+            Exactly the request body that will be sent when the draft is
+            approved, so the review shows what will really happen.
+        result:
+          type: object
+          nullable: true
+          description: What the action created, once executed.
+        error:
+          type: string
+          nullable: true
+        executed_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
           type: string
           format: date-time
 

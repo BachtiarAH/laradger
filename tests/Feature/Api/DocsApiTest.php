@@ -40,3 +40,26 @@ test('the openapi specification documents the expense list filters', function ()
 
     expect(array_column($params, 'name'))->toContain('from', 'to', 'account_id', 'search');
 });
+
+test('the openapi specification documents the ai settings endpoints', function () {
+    $this->getJson('/api/docs')
+        ->assertOk()
+        ->assertJsonPath('paths./me/ai.get.summary', "Show the authenticated user's AI provider settings")
+        ->assertJsonPath('paths./me/ai.put.summary', "Store the authenticated user's AI provider settings")
+        ->assertJsonPath('paths./me/ai.delete.summary', 'Remove the stored AI API key and provider selection')
+        ->assertJsonPath('paths./me/ai/test.post.summary', 'Verify AI credentials against the provider');
+});
+
+test('the openapi specification documents the assistant action endpoints', function () {
+    $this->getJson('/api/docs')
+        ->assertOk()
+        ->assertJsonPath('paths./{tenant}/ai/conversations.post.summary', 'Start a conversation')
+        ->assertJsonPath(
+            'paths./{tenant}/ai/conversations/{conversation}/messages.post.summary',
+            'Send a message and let the assistant act on it',
+        )
+        ->assertJsonPath('paths./{tenant}/ai/drafts.get.summary', "List the caller's proposed actions")
+        ->assertJsonPath('paths./{tenant}/ai/drafts/{draft}.patch.summary', "Correct a draft's payload before approving it")
+        ->assertJsonPath('paths./{tenant}/ai/drafts/{draft}/execute.post.summary', 'Approve a draft and apply it')
+        ->assertJsonPath('paths./{tenant}/ai/drafts/{draft}/reject.post.summary', 'Discard a draft');
+});

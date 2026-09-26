@@ -56,6 +56,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Provider Labels
+    |--------------------------------------------------------------------------
+    |
+    | Human-readable names for the provider keys above, shown by the in-app AI
+    | settings screen. A new provider only has to be registered in two places:
+    | the gateway's PROVIDERS map and this list.
+    |
+    */
+
+    'labels' => [
+        'openai' => 'OpenAI',
+        'anthropic' => 'Anthropic',
+        'openai_compatible' => 'OpenAI compatible (Ollama, vLLM, LM Studio, ...)',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | System Prompt
     |--------------------------------------------------------------------------
     |

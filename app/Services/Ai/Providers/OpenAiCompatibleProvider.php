@@ -2,18 +2,31 @@
 
 namespace App\Services\Ai\Providers;
 
-use App\Services\Ai\Exceptions\AiProviderException;
+use App\Services\Ai\Providers\Concerns\MapsOpenAiMessages;
+use App\Services\Ai\Tools\ToolCall;
 use Illuminate\Http\Client\Response;
 
 class OpenAiCompatibleProvider extends AbstractAiProvider
 {
+    use MapsOpenAiMessages;
+
     public static function name(): string
     {
         return 'openai_compatible';
     }
 
     /**
-     * @param  array<int, array{role: string, content: string}>  $messages
+     * Self-hosted models are frequently too small or too loosely templated to
+     * emit a well-formed tool call, so this stays opt-out via
+     * `ai.providers.*.supports_tools` for endpoints known not to.
+     */
+    public function supportsTools(): bool
+    {
+        return (bool) ($this->config['supports_tools'] ?? true);
+    }
+
+    /**
+     * @param  array<int, array{role: string, content: string, tool_calls?: array<int, ToolCall>, tool_call_id?: string|null}>  $messages
      * @param  array<string, mixed>  $options
      * @return array<string, mixed>
      */
@@ -21,8 +34,28 @@ class OpenAiCompatibleProvider extends AbstractAiProvider
     {
         $payload = [
             'model' => $this->config['model'] ?? 'gpt-4o-mini',
-            'messages' => $messages,
+            'messages' => $this->wireMessages($messages),
         ];
+
+        $tools = $this->requestedTools($options);
+
+        if ($tools !== []) {
+            $payload['tools'] = array_map(
+                static fn (array $tool): array => [
+                    'type' => 'function',
+                    'function' => [
+                        'name' => $tool['name'],
+                        'description' => $tool['description'],
+                        'parameters' => $tool['parameters'],
+                    ],
+                ],
+                $tools,
+            );
+
+            if (filled($options['tool_choice'] ?? null)) {
+                $payload['tool_choice'] = $options['tool_choice'];
+            }
+        }
 
         if (($options['structured'] ?? false) === true) {
             $payload['response_format'] = ['type' => 'json_object'];
@@ -50,14 +83,48 @@ class OpenAiCompatibleProvider extends AbstractAiProvider
     {
         $content = $response->json('choices.0.message.content');
 
-        if (! is_string($content) || blank($content)) {
-            throw AiProviderException::invalidResponse(
-                'The AI provider returned an empty response.',
-                rawResponse: $response->json() ?? [],
+        return is_string($content) ? $content : '';
+    }
+
+    /**
+     * @return array<int, ToolCall>
+     */
+    protected function extractToolCalls(Response $response): array
+    {
+        $calls = $response->json('choices.0.message.tool_calls') ?? [];
+
+        if (! is_array($calls)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($calls as $call) {
+            if (! is_array($call)) {
+                continue;
+            }
+
+            $name = (string) ($call['function']['name'] ?? '');
+
+            if ($name === '') {
+                continue;
+            }
+
+            $arguments = $call['function']['arguments'] ?? [];
+
+            if (is_string($arguments)) {
+                $decoded = json_decode($arguments, true);
+                $arguments = is_array($decoded) ? $decoded : [];
+            }
+
+            $normalized[] = new ToolCall(
+                id: (string) ($call['id'] ?? ''),
+                name: $name,
+                arguments: (array) $arguments,
             );
         }
 
-        return $content;
+        return $normalized;
     }
 
     /**

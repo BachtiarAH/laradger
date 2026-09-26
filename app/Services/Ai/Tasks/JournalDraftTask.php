@@ -4,6 +4,7 @@ namespace App\Services\Ai\Tasks;
 
 use App\Services\Ai\Exceptions\AiProviderException;
 use App\Services\Ai\Gateway\AiGateway;
+use JsonException;
 
 class JournalDraftTask implements AiTask
 {
@@ -70,6 +71,38 @@ class JournalDraftTask implements AiTask
     }
 
     /**
+     * Decode a provider response body into an array.
+     *
+     * A malformed body is an invalid response, not a transport failure: letting
+     * the JsonException escape would skip the gateway's AiProviderException
+     * branch and report a generic request failure instead.
+     *
+     * Markdown fences are stripped first because small self-hosted models
+     * (the openai_compatible path) routinely wrap JSON in ```json blocks even
+     * when asked not to.
+     *
+     * @return array<mixed>
+     */
+    private function decode(string $json): array
+    {
+        $candidate = trim($json);
+
+        if (preg_match('/^```[a-zA-Z]*\s*(.*?)\s*```$/s', $candidate, $matches) === 1) {
+            $candidate = trim($matches[1]);
+        }
+
+        try {
+            $payload = json_decode($candidate, true, flags: JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            throw AiProviderException::invalidResponse(
+                'The AI provider returned a response that was not valid JSON.',
+            );
+        }
+
+        return is_array($payload) ? $payload : [];
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $accounts
      */
     private function buildPrompt(string $statement, array $accounts): string
@@ -120,7 +153,7 @@ class JournalDraftTask implements AiTask
      */
     private function parseDraft(string $json): JournalDraft
     {
-        $payload = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        $payload = $this->decode($json);
 
         $data = is_array($payload) ? ($payload['draft'] ?? $payload) : [];
 

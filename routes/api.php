@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\Api\AccountController;
+use App\Http\Controllers\Api\AiAssistantController;
 use App\Http\Controllers\Api\AiJournalDraftController;
+use App\Http\Controllers\Api\AiSettingsController;
 use App\Http\Controllers\Api\AllocationController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
@@ -51,6 +53,15 @@ Route::prefix('v1')->group(function () {
         Route::get('/tenants', [TenantController::class, 'index']);
         Route::post('/tenants', [TenantController::class, 'store']);
         Route::post('/logout', [AuthController::class, 'logout']);
+
+        // Personal AI provider settings. Deliberately not tenant-scoped: the
+        // key belongs to the user, who may belong to several organizations.
+        Route::prefix('me/ai')->middleware('throttle:ai')->group(function () {
+            Route::get('/', [AiSettingsController::class, 'show']);
+            Route::put('/', [AiSettingsController::class, 'update']);
+            Route::delete('/', [AiSettingsController::class, 'destroy']);
+            Route::post('/test', [AiSettingsController::class, 'test']);
+        });
     });
 
     // Platform admin area (no tenant in the URL; requires the 'admin' middleware).
@@ -85,6 +96,20 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('tags', TagController::class);
         Route::apiResource('budgets', BudgetController::class);
         Route::apiResource('audit-logs', AuditLogController::class)->only(['index', 'show']);
+
+        // AI assistant. Conversations and drafts are personal, so ownership is
+        // checked in the controller on top of the tenant scope.
+        Route::prefix('ai')->middleware('throttle:ai')->group(function () {
+            Route::get('conversations', [AiAssistantController::class, 'conversations']);
+            Route::post('conversations', [AiAssistantController::class, 'createConversation']);
+            Route::get('conversations/{conversation}', [AiAssistantController::class, 'show']);
+            Route::post('conversations/{conversation}/messages', [AiAssistantController::class, 'sendMessage']);
+            Route::get('drafts', [AiAssistantController::class, 'drafts']);
+            Route::patch('drafts/{draft}', [AiAssistantController::class, 'updateDraft']);
+            Route::post('drafts/{draft}/execute', [AiAssistantController::class, 'executeDraft']);
+            Route::post('drafts/{draft}/reject', [AiAssistantController::class, 'rejectDraft']);
+        });
+
         Route::post('transactions', [TransactionController::class, 'store']);
         Route::get('overview', [OverviewController::class, 'index']);
         Route::get('expenses', [ExpenseController::class, 'index']);
