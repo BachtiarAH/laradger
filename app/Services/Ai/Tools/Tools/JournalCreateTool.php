@@ -4,13 +4,21 @@ namespace App\Services\Ai\Tools\Tools;
 
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Requests\StoreJournalRequest;
+use App\Models\Account;
+use App\Models\Tag;
 use App\Services\Ai\Tools\AbstractAiTool;
 use App\Services\Ai\Tools\AiToolKind;
 use App\Services\Ai\Tools\Support\FormRequestInvoker;
 use App\Tenancy\TenantContext;
+use Illuminate\Validation\ValidationException;
 
 class JournalCreateTool extends AbstractAiTool
 {
+    /**
+     * Marks a reference to something this same turn is proposing.
+     */
+    private const PENDING_PREFIX = 'pending:';
+
     public function __construct(
         private readonly FormRequestInvoker $requests,
     ) {}
@@ -62,7 +70,12 @@ class JournalCreateTool extends AbstractAiTool
                     'items' => [
                         'type' => 'object',
                         'properties' => [
-                            'account_id' => self::uuidSchema('Account id from accounts_search. Must be an active leaf account.'),
+                            'account_id' => self::uuidSchema(
+                                'Account id from accounts_search. Must be an active leaf account. '
+                                .'For an account you are proposing with account_create in this same '
+                                .'reply, pass "pending:<account name>" instead — the user approves the '
+                                .'account draft first, then this journal.'
+                            ),
                             'debit' => self::moneySchema('Debit amount as a decimal string, or null.'),
                             'credit' => self::moneySchema('Credit amount as a decimal string, or null.'),
                             'description' => ['type' => 'string', 'maxLength' => 255],
@@ -73,8 +86,15 @@ class JournalCreateTool extends AbstractAiTool
                 ],
                 'tag_ids' => [
                     'type' => 'array',
-                    'items' => self::uuidSchema('Existing tag id.'),
-                    'description' => 'Optional tag ids to attach.',
+                    'items' => self::uuidSchema('Existing tag id, taken from the tag list in your instructions.'),
+                    'description' => 'Optional ids of tags that already exist.',
+                ],
+                'pending_tags' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string', 'maxLength' => 255],
+                    'description' => 'Names of tags you are proposing with tag_create in this same reply. '
+                        .'They are attached once that tag exists, so the user approves the tag first. '
+                        .'Use this instead of tag_ids for a tag that does not exist yet.',
                 ],
             ],
             'required' => ['transaction_date', 'description', 'lines'],
@@ -151,16 +171,63 @@ class JournalCreateTool extends AbstractAiTool
                 fn (mixed $tag): string => is_scalar($tag) ? (string) $tag : '',
                 $this->arrayArgument($arguments, 'tag_ids'),
             ))),
+            'pending_tags' => $this->pendingTagNames($arguments),
         ];
     }
 
     /**
+     * @param  array<string, mixed>  $arguments
+     * @return array<int, string>
+     */
+    private function pendingTagNames(array $arguments): array
+    {
+        $names = [];
+
+        foreach ($this->arrayArgument($arguments, 'pending_tags') as $name) {
+            if (! is_scalar($name)) {
+                continue;
+            }
+
+            $name = trim((string) $name);
+
+            if ($name !== '') {
+                $names[$name] = $name;
+            }
+        }
+
+        return array_values($names);
+    }
+
+    /**
+     * A tag the assistant proposed is still a draft, so it has no id the journal
+     * could reference. Resolving by name at approval time is what lets the two
+     * be proposed together: the user approves the tag, then the journal, and the
+     * journal attaches it. One draft never executes another, so the ordering is
+     * a thing the user does, not a thing that happens behind their back.
+     *
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
      */
     public function execute(array $arguments): array
     {
         $payload = $this->payload($arguments);
+
+        foreach ($payload['lines'] as $index => $line) {
+            $reference = (string) ($line['account_id'] ?? '');
+
+            if (str_starts_with($reference, self::PENDING_PREFIX)) {
+                $payload['lines'][$index]['account_id'] = $this->resolvePendingAccount($reference);
+            }
+        }
+
+        if ($payload['pending_tags'] !== []) {
+            $payload['tags'] = array_values(array_unique([
+                ...$payload['tags'],
+                ...$this->resolvePendingTags($payload['pending_tags']),
+            ]));
+
+            unset($payload['pending_tags']);
+        }
 
         $request = $this->requests->make(
             StoreJournalRequest::class,
@@ -172,6 +239,54 @@ class JournalCreateTool extends AbstractAiTool
         $response = app(JournalController::class)->store((string) TenantContext::id(), $request);
 
         return (array) ($response->getData(true)['data'] ?? []);
+    }
+
+    /**
+     * A proposed account is a draft, not an account, so there is no id to
+     * reference yet. Resolving the name at approval time is what lets the
+     * assistant record a transaction and the account it needs in one reply,
+     * which is the only way a ledger with a new category is usable at all.
+     */
+    private function resolvePendingAccount(string $reference): string
+    {
+        $name = trim(substr($reference, strlen(self::PENDING_PREFIX)));
+
+        $account = Account::query()->where('name', $name)->where('is_header', false)->first();
+
+        if ($account === null) {
+            throw ValidationException::withMessages([
+                'lines' => "The account \"{$name}\" is still waiting to be approved. "
+                    .'Approve that account first, then approve this journal.',
+            ]);
+        }
+
+        return (string) $account->getKey();
+    }
+
+    /**
+     * @param  array<int, string>  $names
+     * @return array<int, string>
+     */
+    private function resolvePendingTags(array $names): array
+    {
+        $ids = [];
+
+        foreach ($names as $name) {
+            $tag = Tag::query()->where('name', $name)->first();
+
+            if ($tag === null) {
+                // A raw "tags.0 does not exist" tells the user nothing. Name
+                // the tag and what to do about it.
+                throw ValidationException::withMessages([
+                    'tags' => "The tag \"{$name}\" is still waiting to be approved. "
+                        .'Approve that tag first, then approve this journal.',
+                ]);
+            }
+
+            $ids[] = $tag->getKey();
+        }
+
+        return $ids;
     }
 
     /**

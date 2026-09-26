@@ -6,8 +6,10 @@ use App\Models\AiConversation;
 use App\Models\AiMessage;
 use App\Models\AuditLog;
 use App\Models\Journal;
+use App\Models\Tag;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Ai\Omni\SystemPromptBuilder;
 use App\Services\Ai\Tools\AiToolKind;
 use App\Services\Ai\Tools\AiToolRegistry;
 use App\Tenancy\TenantContext;
@@ -519,4 +521,192 @@ test('the registry exposes only known tools, with write tools kept separate', fu
         expect($tool->parameters()['type'])->toBe('object');
         expect($tool->description())->not->toBe('');
     }
+});
+
+/**
+ * A tag or account the assistant proposes in the same reply is still a draft, so
+ * it has no id the journal could reference. These pin the two halves of that:
+ * the reference is stored unresolved so the reviewer sees what was proposed, and
+ * it is resolved by name only when the user approves.
+ */
+describe('referencing something proposed in the same reply', function () {
+    test('a pending tag is stored by name and attached on approval', function () {
+        fakeToolCallingProvider([[
+            'id' => 'call_1',
+            'name' => 'journal_create',
+            'arguments' => [
+                'transaction_date' => '2026-08-17',
+                'description' => 'Groceries',
+                'lines' => [
+                    ['account_id' => $this->coffee->id, 'debit' => '25.00'],
+                    ['account_id' => $this->cash->id, 'credit' => '25.00'],
+                ],
+                'pending_tags' => ['Groceries'],
+            ],
+        ]]);
+
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $this->postJson("{$this->base}/ai/conversations/{$conversation->id}/messages", [
+            'message' => 'bought groceries',
+        ])->assertOk();
+
+        reenter($this->tenant);
+        $draft = AiActionDraft::withoutGlobalScopes()->firstOrFail();
+
+        // Reviewable: the name is visible, and no tag has been created yet.
+        expect($draft->payload['pending_tags'])->toBe(['Groceries'])
+            ->and($draft->payload['tags'])->toBe([])
+            ->and(Tag::withoutGlobalScopes()->count())->toBe(0);
+
+        // The user approves the tag draft first.
+        $tagDraft = $conversation->drafts()->create([
+            'user_id' => $this->user->id,
+            'tool' => 'tag_create',
+            'kind' => 'write',
+            'title' => 'Create vendor tag "Groceries"',
+            'status' => AiActionDraft::STATUS_PENDING,
+            'payload' => ['name' => 'Groceries', 'type' => 'vendor'],
+        ]);
+
+        $this->postJson("{$this->base}/ai/drafts/{$tagDraft->id}/execute")->assertOk();
+
+        reenter($this->tenant);
+        $this->postJson("{$this->base}/ai/drafts/{$draft->id}/execute")->assertOk();
+
+        reenter($this->tenant);
+        $journal = Journal::withoutGlobalScopes()->firstOrFail();
+
+        expect($journal->tags()->pluck('tags.name')->all())->toBe(['Groceries']);
+    });
+
+    test('a pending tag that was never approved fails with an instruction, not a uuid complaint', function () {
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $draft = $conversation->drafts()->create([
+            'user_id' => $this->user->id,
+            'tool' => 'journal_create',
+            'kind' => 'write',
+            'title' => 'Create journal — groceries',
+            'status' => AiActionDraft::STATUS_PENDING,
+            'payload' => [
+                'transaction_date' => '2026-08-17',
+                'description' => 'Groceries',
+                'status' => 'draft',
+                'source' => 'manual',
+                'lines' => [
+                    ['account_id' => $this->coffee->id, 'debit' => '25.00'],
+                    ['account_id' => $this->cash->id, 'credit' => '25.00'],
+                ],
+                'tags' => [],
+                'pending_tags' => ['Groceries'],
+            ],
+        ]);
+
+        $this->postJson("{$this->base}/ai/drafts/{$draft->id}/execute")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['tags']);
+
+        $this->assertStringContainsString(
+            'Approve that tag first',
+            (string) $draft->refresh()->error,
+        );
+
+        reenter($this->tenant);
+        expect(Journal::withoutGlobalScopes()->count())->toBe(0);
+    });
+
+    test('a pending account is stored as a name reference and resolved on approval', function () {
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $draft = $conversation->drafts()->create([
+            'user_id' => $this->user->id,
+            'tool' => 'journal_create',
+            'kind' => 'write',
+            'title' => 'Create journal — rent',
+            'status' => AiActionDraft::STATUS_PENDING,
+            'payload' => [
+                'transaction_date' => '2026-08-17',
+                'description' => 'Rent',
+                'status' => 'draft',
+                'source' => 'manual',
+                'lines' => [
+                    ['account_id' => 'pending:Rent', 'debit' => '5000000.00'],
+                    ['account_id' => $this->cash->id, 'credit' => '5000000.00'],
+                ],
+                'tags' => [],
+            ],
+        ]);
+
+        // Unresolved while pending, so the review card can show the name.
+        expect($draft->payload['lines'][0]['account_id'])->toBe('pending:Rent');
+
+        $rent = Account::factory()->create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Rent',
+            'type' => 'expense',
+            'code' => 'EX-0002',
+            'status' => 'active',
+        ]);
+
+        $this->postJson("{$this->base}/ai/drafts/{$draft->id}/execute")->assertOk();
+
+        reenter($this->tenant);
+        $journal = Journal::withoutGlobalScopes()->firstOrFail();
+
+        expect($journal->lines()->pluck('account_id')->all())
+            ->toContain($rent->id);
+    });
+
+    test('a pending account with nothing behind it fails with an instruction', function () {
+        $conversation = AiConversation::factory()->forUser($this->user, $this->tenant)->create();
+
+        $draft = $conversation->drafts()->create([
+            'user_id' => $this->user->id,
+            'tool' => 'journal_create',
+            'kind' => 'write',
+            'title' => 'Create journal — rent',
+            'status' => AiActionDraft::STATUS_PENDING,
+            'payload' => [
+                'transaction_date' => '2026-08-17',
+                'description' => 'Rent',
+                'status' => 'draft',
+                'source' => 'manual',
+                'lines' => [
+                    ['account_id' => 'pending:Rent', 'debit' => '5000000.00'],
+                    ['account_id' => $this->cash->id, 'credit' => '5000000.00'],
+                ],
+                'tags' => [],
+            ],
+        ]);
+
+        $this->postJson("{$this->base}/ai/drafts/{$draft->id}/execute")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['lines']);
+
+        $this->assertStringContainsString(
+            'Approve that account first',
+            (string) $draft->refresh()->error,
+        );
+    });
+});
+
+test('the prompt tells the model how to reference a tag it is proposing', function () {
+    $tag = Tag::factory()->create([
+        'tenant_id' => $this->tenant->id,
+        'name' => 'Groceries',
+        'type' => 'vendor',
+    ]);
+
+    // The prompt reads live tenant data through tenant-scoped models.
+    reenter($this->tenant);
+
+    $prompt = app(SystemPromptBuilder::class)->system()['content'];
+
+    // Without this the model can only ever attach a tag that already exists,
+    // and it has no way to learn an id for one.
+    expect($prompt)->toContain('pending_tags')
+        ->and($prompt)->toContain('`draft_id` from a tool result into `tag_ids`')
+        ->and($prompt)->toContain('The tags that already exist')
+        ->and($prompt)->toContain($tag->id);
 });

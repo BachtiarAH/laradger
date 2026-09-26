@@ -165,6 +165,33 @@ than aspirational. Two traps it papers over:
 Cross-tenant payloads are stopped by the tenant-scoped `Rule::exists` rules on
 ids, not only by policies — several policies allow any authenticated user.
 
+## A write tool cannot reference another write tool's id
+
+A write tool does not execute, so when the model calls `tag_create` or
+`account_create` the tool result hands back a `draft_id` (an
+`ai_action_drafts.id`) — **not** a `tags.id` or `accounts.id`. Those rows do not
+exist yet, and `StoreJournalRequest` requires real ids via
+`Rule::exists`. So "call account_create, then use the account you just proposed"
+is unimplementable as written, and a ledger with a new category could never
+record a transaction at all.
+
+The model gets ids from two places only:
+
+- `SystemPromptBuilder` lists live accounts and live tags with their real ids.
+  Anything the model must reference needs to be in one of those lists.
+- A reference to something proposed in the *same* turn is carried by **name**,
+  not id, and resolved at approval time: `pending:<name>` in
+  `lines[].account_id`, and `pending_tags` (names) on `journal_create`.
+
+`JournalCreateTool::payload()` stores the reference **unresolved** so the review
+card shows what was proposed and reviewed still equals sent;
+`execute()` resolves it and throws a `ValidationException` naming the tag or
+account and telling the user to approve it first. One draft never executes
+another, so approval order is the user's job — do not chain them.
+
+When adding a write tool that produces something another write tool must point
+at, follow this pattern rather than inventing a placeholder id.
+
 ## Chat is synchronous; drafting is queued
 
 Two deliberately different paths. Do not merge them.

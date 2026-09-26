@@ -3,6 +3,7 @@
 namespace App\Services\Ai\Omni;
 
 use App\Models\Account;
+use App\Models\Tag;
 use App\Services\Ai\Tools\AiTool;
 use App\Services\Ai\Tools\AiToolKind;
 use App\Services\Ai\Tools\AiToolRegistry;
@@ -27,6 +28,12 @@ class SystemPromptBuilder
      */
     public const MODE_DRAFTING = 'drafting';
 
+    /**
+     * The write tools that cover most real requests, called out in the prompt
+     * ahead of the full list.
+     */
+    private const PRIMARY_TOOLS = ['journal_create', 'tag_create'];
+
     public function __construct(
         private readonly AiToolRegistry $tools,
     ) {}
@@ -42,9 +49,11 @@ class SystemPromptBuilder
                 $this->role(),
                 $this->today(),
                 $this->chartOfAccounts(),
+                $this->tags(),
                 $this->hardRules(),
                 $this->batching(),
                 $mode === self::MODE_DRAFTING ? $this->unattended() : null,
+                $this->primaryActions(),
                 $this->capabilities(),
             ])),
         ];
@@ -63,10 +72,13 @@ class SystemPromptBuilder
         - If the instruction is ambiguous, pick the most ordinary bookkeeping
           reading, propose the draft anyway, and say in one line which
           interpretation you chose.
-        - If no existing account fits, propose `account_create` first, then use
-          the account you just proposed. Never guess an account id.
+        - If no existing account fits, propose `account_create` in this same reply
+          and reference the account as `pending:<name>` in the journal. Never guess
+          an account id, and never pass a `draft_id` as one.
         - Every draft is reviewed by a human before anything is applied, so a
           stated assumption costs nothing while a question costs the whole turn.
+        - Drafts that depend on each other are approved in order: say which one
+          the user has to approve first.
         PROMPT;
     }
 
@@ -108,6 +120,32 @@ class SystemPromptBuilder
         ))->implode("\n");
 
         return "The accounts you may post to (use the exact `id` values, never guess one):\n".$list;
+    }
+
+    /**
+     * Real tag ids, same reason as the chart of accounts.
+     *
+     * Without this the model has no way to name an existing tag at all, so
+     * tagging silently never happened even though the tool accepted ids.
+     */
+    private function tags(): string
+    {
+        $tags = Tag::query()->orderBy('name')->limit(200)->get(['id', 'name', 'type']);
+
+        if ($tags->isEmpty()) {
+            return 'This ledger has no tags yet. Propose tag_create for any category, vendor, or '
+                .'period worth repeating, and list the name in journal_create `pending_tags` so the '
+                .'journal picks it up once the tag is approved.';
+        }
+
+        $list = $tags->map(fn (Tag $tag): string => sprintf(
+            '- %s | %s | id=%s',
+            $tag->name,
+            $tag->type,
+            $tag->getKey(),
+        ))->implode("\n");
+
+        return "The tags that already exist (use the exact `id` values in `tag_ids`):\n".$list;
     }
 
     private function hardRules(): string
@@ -155,10 +193,62 @@ class SystemPromptBuilder
         PROMPT;
     }
 
+    /**
+     * The tools that cover nearly every request the assistant actually gets.
+     *
+     * A flat list of seven write tools reads as seven equals, and a model
+     * reliably under-uses the quieter ones — most visibly tag_create, which is
+     * easy to treat as optional decoration. Naming the two that matter, with a
+     * trigger for each, is what makes them get used.
+     */
+    private function primaryActions(): string
+    {
+        $registry = $this->tools;
+
+        foreach (self::PRIMARY_TOOLS as $name) {
+            if (! $registry->has($name)) {
+                return '';
+            }
+        }
+
+        return <<<'PROMPT'
+        Almost every request is one of these two, or both:
+
+        1. `journal_create` — the user described money moving. Expenses, income,
+           transfers, anything they want recorded. Reach for this first and
+           without hesitation when they say "catat", "bayar", "masuk", "gajian",
+           "beli", or name an amount with a context. If you are unsure whether
+           it is worth recording, record it as a draft: the user reviews every
+           one, so a draft they reject costs them nothing, while a transaction
+           you failed to propose is work they have to redo by hand.
+        2. `tag_create` — the user named a category, vendor, or period worth
+           repeating: groceries, BCA, monthly, urgent. Tag it yourself even if
+           they did not ask, because tags are what make the entry findable
+           later. Do it in the same reply as the journal, never as a separate
+           turn.
+
+        How the two connect, since a proposed tag has no id yet:
+        - Tag already exists → put its `id` in the journal's `tag_ids`.
+        - Tag does not exist → call `tag_create`, then put its *name* in the
+          journal's `pending_tags`. The journal attaches it once the tag draft
+          is approved, so the user approves the tag first. Never put a
+          `draft_id` from a tool result into `tag_ids`; that is not a tag id.
+        - When you do this, tell the user to approve the tag draft before the
+          journal, otherwise they will try the wrong order first.
+
+        Proposing both is normal and expected, not overreach.
+        PROMPT;
+    }
+
     private function capabilities(): string
     {
         $reads = collect($this->tools->ofKind(AiToolKind::Read));
-        $writes = collect($this->tools->ofKind(AiToolKind::Write));
+
+        // Primaries first: the order the model reads them in is the order it
+        // reaches for them.
+        $writes = collect($this->tools->ofKind(AiToolKind::Write))
+            ->sortBy(fn (AiTool $tool): int => in_array($tool->name(), self::PRIMARY_TOOLS, true) ? 0 : 1)
+            ->values();
 
         $lines = [
             'Read tools run immediately and give you facts:',
