@@ -4,7 +4,7 @@ info:
   description: |
     Ledgify is a double-entry ledger application. This API exposes authentication,
     the chart of accounts, journals (with lines and tags), budgets, allocations
-    (reserving part of an account balance for a purpose), and audit logs.
+    (reserving part of an account balance for a purpose), expenses, and audit logs.
 
     ## Allocations
 
@@ -90,6 +90,8 @@ tags:
     description: Individual debit/credit lines of a journal
   - name: Journal Tags
     description: Attach tags to journals
+  - name: Expenses
+    description: Expense lines on `type = expense` accounts, filterable by date range
   - name: Tags
     description: Tag definitions
   - name: Budgets
@@ -1044,6 +1046,100 @@ paths:
                     $ref: '#/components/schemas/JournalLine'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/expenses:
+    get:
+      tags: [Expenses]
+      summary: List expenses
+      description: |
+        Paginated list of the debits booked on `type = expense` accounts, used by
+        the dashboard expense list. Only `posted` and `archived` journals are
+        included unless a `status` is given, so the list always agrees with the
+        dashboard expense KPI. `meta.totals.expense_total` is the sum of the
+        filtered range, not of the current page.
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+        - name: from
+          in: query
+          description: Transaction date lower bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: Transaction date upper bound (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          description: Journal status. Defaults to `posted` and `archived`.
+          schema:
+            type: string
+            enum: [draft, posted, archived]
+        - name: account_id
+          in: query
+          description: Restrict the list to a single expense account
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          description: Matches the line description or the journal reference/description
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [transaction_date, debit, account]
+            default: transaction_date
+        - name: sort_direction
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Paginated list of expense journal lines
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JournalLine'
+                      meta:
+                        type: object
+                        properties:
+                          totals:
+                            type: object
+                            properties:
+                              expense_total:
+                                type: string
+                                description: Sum of the filtered expense debits
+                              lines_count:
+                                type: integer
+                                description: Number of matching lines across all pages
+                          date_range:
+                            type: object
+                            properties:
+                              from:
+                                type: string
+                                format: date
+                                nullable: true
+                              to:
+                                type: string
+                                format: date
+                                nullable: true
         '401':
           $ref: '#/components/responses/Unauthorized'
   /{tenant}/journal-lines/{journal_line}:

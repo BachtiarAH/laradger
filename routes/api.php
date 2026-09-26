@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AllocationController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
+use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\GoalController;
 use App\Http\Controllers\Api\JournalController;
 use App\Http\Controllers\Api\JournalLineController;
@@ -86,5 +87,6 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('audit-logs', AuditLogController::class)->only(['index', 'show']);
         Route::post('transactions', [TransactionController::class, 'store']);
         Route::get('overview', [OverviewController::class, 'index']);
+        Route::get('expenses', [ExpenseController::class, 'index']);
     });
 });

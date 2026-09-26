@@ -31,3 +31,12 @@ test('the openapi specification documents the allocation endpoints', function ()
         ->assertJsonPath('paths./{tenant}/allocations/{allocation}/allocate.post.summary', 'Allocate money on an account')
         ->assertJsonPath('paths./{tenant}/accounts/{account}/allocations.get.summary', 'Show the allocation summary for an account');
 });
+
+test('the openapi specification documents the expense list filters', function () {
+    $params = $this->getJson('/api/docs')
+        ->assertOk()
+        ->assertJsonPath('paths./{tenant}/expenses.get.summary', 'List expenses')
+        ->json('paths./{tenant}/expenses.get.parameters');
+
+    expect(array_column($params, 'name'))->toContain('from', 'to', 'account_id', 'search');
+});
