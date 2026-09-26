@@ -64,6 +64,26 @@ class JournalTemplateSeeder extends Seeder
             $lines = $data['lines'];
             unset($data['lines']);
 
+            // Resolve every account before writing anything. A partially created
+            // template is worse than none: it looks seeded and working, its line
+            // table renders empty, and the scheduler would later post a journal
+            // with no lines to it.
+            $missing = collect($lines)
+                ->reject(fn (array $line): bool => $accountIds->has($line[0]))
+                ->pluck(0)
+                ->unique()
+                ->values();
+
+            if ($missing->isNotEmpty()) {
+                $this->command?->warn(sprintf(
+                    'Skipped "%s": account code %s not in this ledger.',
+                    $data['name'],
+                    $missing->implode(', '),
+                ));
+
+                continue;
+            }
+
             $template = JournalTemplate::firstOrCreate(
                 ['tenant_id' => $tenantId, 'name' => $data['name']],
                 [
@@ -75,14 +95,8 @@ class JournalTemplateSeeder extends Seeder
             );
 
             foreach ($lines as $index => [$code, $debit, $credit, $description]) {
-                $accountId = $accountIds->get($code);
-
-                if (! $accountId) {
-                    continue;
-                }
-
                 $template->lines()->firstOrCreate([
-                    'account_id' => $accountId,
+                    'account_id' => $accountIds->get($code),
                     'debit' => $debit,
                     'credit' => $credit,
                     'description' => $description,

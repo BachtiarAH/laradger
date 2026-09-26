@@ -165,6 +165,29 @@ than aspirational. Two traps it papers over:
 Cross-tenant payloads are stopped by the tenant-scoped `Rule::exists` rules on
 ids, not only by policies — several policies allow any authenticated user.
 
+## A template with no lines is never acceptable
+
+`JournalTemplateSeeder` resolves accounts by **code** (`JAGO`, `GAJI`, `GOPAY`,
+`UTIL`, `BRI`). Ledgers built from the standard chart use hierarchical codes
+(`1`, `1-1`, `1-1-1-1`), so none of them match. The seeder used to `continue`
+past each missing code, which produced four templates with **zero** lines and no
+warning: the line table rendered empty, Generate produced nothing, and the
+scheduled run booked a journal with a description and no lines at all.
+
+Two guards, and both are needed:
+
+- The seeder resolves every account before writing anything and skips the whole
+  template if a code is missing. A partially seeded template looks ready to use
+  and is not.
+- `JournalTemplateService::generate()` throws a `ValidationException` when a
+  template has no lines. `processDue()` already catches that and skips, so a
+  bad template cannot stop the batch and keeps its schedule.
+
+`journal_template_lines` has no minimum at the database level — the invariant is
+enforced in the request (`StoreJournalTemplateRequest`, `lines` `min:1`) and now
+in the service. Do not write a path that creates a template without going
+through one of them.
+
 ## A write tool cannot reference another write tool's id
 
 A write tool does not execute, so when the model calls `tag_create` or

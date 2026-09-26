@@ -41,6 +41,18 @@ class JournalTemplateService
                 try {
                     $date = $transactionDate ?? now();
                     $defaultLines = $template->lines()->get();
+
+                    // A template with no lines would produce a journal with no
+                    // lines: the scheduler would book a description and nothing
+                    // else, and nothing would look wrong until a report tried to
+                    // total it. Refuse instead, which processDue() already
+                    // catches and skips.
+                    if ($defaultLines->isEmpty()) {
+                        throw ValidationException::withMessages([
+                            'lines' => "Template \"{$template->name}\" has no lines, so it cannot generate a journal.",
+                        ]);
+                    }
+
                     $overrideRows = $lineOverrides ? array_values($lineOverrides) : [];
                     $allocationId = $this->allocationResolver->resolveForTemplate(
                         $template->allocation_id,
