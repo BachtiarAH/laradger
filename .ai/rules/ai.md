@@ -165,45 +165,46 @@ than aspirational. Two traps it papers over:
 Cross-tenant payloads are stopped by the tenant-scoped `Rule::exists` rules on
 ids, not only by policies — several policies allow any authenticated user.
 
-## An assistant turn runs on the queue
+## Chat is synchronous; drafting is queued
 
-A turn spans several paid provider calls, so it is queued. `POST
-/ai/conversations/{c}/messages` returns **202** immediately; the user can close
-the page and come back. `GET .../status` is the lightweight poll
-(`queued` -> `running` -> `completed` | `failed`); the UI stops polling once it is
-terminal and then reads the conversation for drafts.
+Two deliberately different paths. Do not merge them.
 
-```
-request -> recordUserMessage()   (in the request, so the thread reads correctly)
-        -> RunAiAssistantTurn::dispatch() -> 202
-worker  -> rebuild tenant context + auth -> OmniAssistant::respond()
-```
+| | Assistant chat | Drafting |
+|---|---|---|
+| Endpoint | `POST /ai/conversations/{c}/messages` | `POST /ai/draft-requests` |
+| Response | `200` with `reply` + `drafts` | `202`, work in the background |
+| Why | the user is waiting for an answer | a batch of transactions is worth queueing |
 
-`OmniAssistant` is split for this reason: `recordUserMessage()` runs inside the
-HTTP request where the tenant context and user exist, and `respond()` runs in
-the worker. Do not merge them - the user message must be persisted
-synchronously or the thread stays empty until the job lands.
+Both share `OmniAssistant::respond()`. The chat records the user's words inside
+the request (where the tenant context and user exist) and passes no prompt. A
+queued request has no request to record in - it creates its own conversation
+inside the job - so it passes the prompt, which becomes the first message of the
+turn.
 
-**A job has no tenant context and no authenticated user.** `RunAiAssistantTurn`
+`AiDraftRequest` is therefore a *submitted prompt* with its own status
+(`queued` / `running` / `completed` / `failed`) and `drafts_count`, which is what
+the user watches. `ai_action_drafts.ai_draft_request_id` links each draft back
+to the prompt that produced it; the job stamps it after the turn, because the
+assistant is shared with the chat path and has no request to know about.
+
+**A job has no tenant context and no authenticated user.** `RunAiDraftRequest`
 rebuilds both (`TenantContext::set()`, `Auth::setUser()`) and clears the context
-in a `finally`. Without this every query fails closed, because `BelongsToTenant`
-is fail-closed with no context. It loads the conversation with
-`withoutGlobalScopes()` precisely because there is no context yet.
+in a `finally`. Without it every query fails closed, since `BelongsToTenant` is
+fail-closed with no context. It loads the request with `withoutGlobalScopes()`
+for the same reason.
 
 `tries = 1` on purpose: the gateway already falls back across providers, so a
-retry is another round of paid calls for no new information. The job re-throws
-after recording a safe message, so the failure still lands in `failed_jobs` for
-ops while the conversation shows something the user can act on.
+retry is another round of paid calls. The job re-throws after recording a safe
+message, so the failure lands in `failed_jobs` for ops while the request shows
+the user something actionable.
 
-**This requires a worker.** `composer run dev` runs one; in production run
-`queue:work`. With no worker the conversation stays `queued` forever, so the UI
-has to say so rather than spinning indefinitely.
+**Queued drafting requires a worker.** `composer run dev` runs one; in production
+`queue:work`. With none running a request stays `queued` forever, so the UI has
+to say so rather than spinning. A dispatch failure is marked `failed` in the
+controller so it cannot hang as "merely slow".
 
-Under the `sync` driver the job runs inline, so a failing turn would otherwise
-surface as a 500 on the message itself. The controller catches around the
-dispatch and still answers 202 with the status it landed on, keeping the
-contract identical across drivers. A conversation with a turn already in flight
-is refused with 409 so two turns cannot interleave one transcript.
+A chat turn and a queued request can run at the same time; that is fine, since
+they own separate conversations.
 
 ## Assistant data model
 

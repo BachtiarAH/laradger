@@ -61,13 +61,20 @@ class OmniAssistant
     /**
      * Produce the assistant's reply and any proposed actions.
      *
-     * Runs on the queue. The caller is responsible for having re-established
-     * the tenant context and the authenticated user, because a job has neither.
+     * Used by both paths. The synchronous chat records the user's words itself
+     * (inside the request, where the tenant context and user exist) and passes
+     * no prompt. A queued drafting request has no request to record in — its
+     * conversation is created inside the job — so it passes the prompt and the
+     * message becomes the first step of the turn.
      *
      * @return array{reply: string, drafts: Collection<int, AiActionDraft>, reads: array<int, array<string, mixed>>}
      */
-    public function respond(AiConversation $conversation): array
+    public function respond(AiConversation $conversation, ?string $prompt = null): array
     {
+        if (filled($prompt)) {
+            $this->recordUserMessage($conversation, $prompt);
+        }
+
         $messages = $this->history($conversation);
         $options = ['tools' => $this->tools->definitions()];
 

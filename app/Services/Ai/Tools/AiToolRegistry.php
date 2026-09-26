@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai\Tools;
 
+use App\Services\Ai\Exceptions\AiProviderException;
 use App\Services\Ai\Tools\Tools\AccountCreateTool;
 use App\Services\Ai\Tools\Tools\AccountsGetTool;
 use App\Services\Ai\Tools\Tools\AccountsSearchTool;
@@ -71,9 +72,18 @@ class AiToolRegistry
         return isset($this->all()[$name]);
     }
 
+    /**
+     * @throws AiProviderException when the model asked for something that is
+     *                             not registered. That is a malformed model
+     *                             response, not a server fault, so it travels as
+     *                             one: the gateway records it and may fall back
+     *                             to another provider that gets it right.
+     */
     public function get(string $name): AiTool
     {
-        return $this->all()[$name] ?? throw new InvalidArgumentException("Unknown AI tool [{$name}].");
+        return $this->all()[$name] ?? throw AiProviderException::invalidResponse(
+            "The assistant asked for an action that does not exist: [{$name}]."
+        );
     }
 
     /**

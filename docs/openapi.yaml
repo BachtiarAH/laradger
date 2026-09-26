@@ -619,21 +619,15 @@ paths:
   /{tenant}/ai/conversations/{conversation}/messages:
     post:
       tags: [AI]
-      summary: Send a message and queue an assistant turn
+      summary: Send a message and get the assistant's reply
       description: |
-        Accepts a message and returns `202` immediately. The turn runs on the
-        queue because it spans several paid provider calls, so the user does not
-        wait and can leave the page; they come back to the drafts later.
+        Synchronous, and deliberately so: this is a conversation and the user is
+        waiting for the answer. Fire-and-forget work belongs on
+        `POST /ai/draft-requests` instead.
 
         Within the turn, **read** tools run so the assistant has facts to reason
         with, and **write** tools are only ever *proposed* as pending drafts.
         Nothing is applied without an explicit approval.
-
-        A conversation with a turn already queued or running is refused with
-        `409`, so two turns cannot interleave one transcript.
-
-        **Requires a queue worker.** With none running the conversation stays
-        `queued` forever; `GET .../status` reports which state it is in.
       parameters:
         - name: conversation
           in: path
@@ -653,7 +647,81 @@ paths:
                   type: string
                   maxLength: 4000
               example:
-                message: I spent 4.50 on coffee, paid with cash
+                message: how much can I spend this month?
+      responses:
+        '200':
+          description: The reply, plus any drafts the turn proposed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      reply:
+                        type: string
+                      drafts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AiActionDraft'
+        '404':
+          description: Conversation not found, or not owned by the caller
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '502':
+          description: The AI provider could not be reached, or the model
+            proposed an action that does not exist
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /{tenant}/ai/draft-requests:
+    get:
+      tags: [AI]
+      summary: List the caller's drafting requests
+      description: |
+        Every prompt submitted for background drafting, newest first, with the
+        state of each: `queued`, `running`, `completed`, or `failed`. Poll this
+        to follow submitted work.
+      responses:
+        '200':
+          description: Drafting requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AiDraftRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [AI]
+      summary: Queue a drafting prompt
+      description: |
+        Submits a prompt to be worked on in the background and returns `202`
+        immediately. The user can carry on and come back to the drafts later.
+
+        A drafting request only ever *proposes* actions: they land in
+        `ai_action_drafts` as `pending`, and each is linked back to the request
+        that produced it via `ai_draft_request_id`.
+
+        **Requires a queue worker.** With none running the request stays `queued`
+        forever; poll `GET /ai/draft-requests` to see that it has not started.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                  maxLength: 4000
+              example:
+                prompt: Record 4.50 of coffee paid in cash
       responses:
         '202':
           description: Accepted and queued
@@ -663,51 +731,9 @@ paths:
                 type: object
                 properties:
                   data:
-                    type: object
-                    properties:
-                      status:
-                        type: string
-                        enum: [queued, running, completed, failed]
-                      conversation_id:
-                        type: string
-                        format: uuid
-                      message_id:
-                        type: string
-                        format: uuid
-        '409':
-          description: A turn is already queued or running in this conversation
+                    $ref: '#/components/schemas/AiDraftRequest'
         '422':
           $ref: '#/components/responses/ValidationError'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /{tenant}/ai/conversations/{conversation}/status:
-    get:
-      tags: [AI]
-      summary: Poll how far an assistant turn has got
-      description: |
-        A lightweight progress probe so a client can poll while a turn is in
-        flight without refetching the whole transcript. Stop polling once the
-        status is `completed` or `failed`, then read the conversation for the
-        drafts it produced.
-      parameters:
-        - name: conversation
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: The turn status
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/AiTurnStatus'
-        '404':
-          description: Conversation not found, or not owned by the caller
         '401':
           $ref: '#/components/responses/Unauthorized'
   /{tenant}/ai/drafts:
@@ -2480,20 +2506,30 @@ components:
           type: string
           format: date-time
 
-    AiTurnStatus:
+    AiDraftRequest:
       type: object
+      description: A prompt submitted to be drafted in the background.
       properties:
+        id:
+          type: string
+          format: uuid
+        prompt:
+          type: string
         status:
           type: string
-          enum: [idle, queued, running, completed, failed]
+          enum: [queued, running, completed, failed]
+          description: |
+            `queued` that has not become `running` means no queue worker is
+            picking work up.
         error:
           type: string
           nullable: true
           description: |
-            A safe, user-facing sentence when the turn failed. Never the raw
+            A safe, user-facing sentence when the request failed. Never the raw
             provider response.
-        pending_drafts_count:
+        drafts_count:
           type: integer
+          description: How many drafts the request produced.
         queued_at:
           type: string
           format: date-time
@@ -2506,6 +2542,9 @@ components:
           type: string
           format: date-time
           nullable: true
+        created_at:
+          type: string
+          format: date-time
 
     AiMessage:
       type: object
@@ -2560,6 +2599,13 @@ components:
           description: |
             Exactly the request body that will be sent when the draft is
             approved, so the review shows what will really happen.
+        ai_draft_request_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            The drafting request that produced this draft, when it came from the
+            queued path rather than an interactive chat turn.
         result:
           type: object
           nullable: true

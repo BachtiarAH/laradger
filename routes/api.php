@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AccountController;
 use App\Http\Controllers\Api\AiAssistantController;
+use App\Http\Controllers\Api\AiDraftRequestController;
 use App\Http\Controllers\Api\AiJournalDraftController;
 use App\Http\Controllers\Api\AiSettingsController;
 use App\Http\Controllers\Api\AllocationController;
@@ -103,8 +104,11 @@ Route::prefix('v1')->group(function () {
             Route::get('conversations', [AiAssistantController::class, 'conversations']);
             Route::post('conversations', [AiAssistantController::class, 'createConversation']);
             Route::get('conversations/{conversation}', [AiAssistantController::class, 'show']);
-            Route::get('conversations/{conversation}/status', [AiAssistantController::class, 'status']);
             Route::post('conversations/{conversation}/messages', [AiAssistantController::class, 'sendMessage']);
+
+            // Queued, fire-and-forget drafting. Distinct from the chat above.
+            Route::get('draft-requests', [AiDraftRequestController::class, 'index']);
+            Route::post('draft-requests', [AiDraftRequestController::class, 'store']);
             Route::get('drafts', [AiAssistantController::class, 'drafts']);
             Route::patch('drafts/{draft}', [AiAssistantController::class, 'updateDraft']);
             Route::post('drafts/{draft}/execute', [AiAssistantController::class, 'executeDraft']);
