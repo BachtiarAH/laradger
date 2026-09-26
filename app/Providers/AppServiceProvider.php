@@ -39,5 +39,15 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('ai', function (Request $request) {
             return Limit::perMinute(30)->by((string) ($request->user()?->getKey() ?? $request->ip()));
         });
+
+        // The two read-only AI endpoints the drafting page polls while a prompt is
+        // in flight. Separate from `ai` because they call no model and cost
+        // nothing: leaving them on the spending limit meant a queued prompt's
+        // progress bar exhausted the budget and the next real message was
+        // rejected. 120/min is roughly five times what the page actually uses, so
+        // it still stops a runaway client without getting in the way.
+        RateLimiter::for('ai-status', function (Request $request) {
+            return Limit::perMinute(120)->by((string) ($request->user()?->getKey() ?? $request->ip()));
+        });
     }
 }

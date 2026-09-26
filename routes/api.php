@@ -100,19 +100,29 @@ Route::prefix('v1')->group(function () {
 
         // AI assistant. Conversations and drafts are personal, so ownership is
         // checked in the controller on top of the tenant scope.
-        Route::prefix('ai')->middleware('throttle:ai')->group(function () {
-            Route::get('conversations', [AiAssistantController::class, 'conversations']);
-            Route::post('conversations', [AiAssistantController::class, 'createConversation']);
-            Route::get('conversations/{conversation}', [AiAssistantController::class, 'show']);
-            Route::post('conversations/{conversation}/messages', [AiAssistantController::class, 'sendMessage']);
+        Route::prefix('ai')->group(function () {
+            // Free status reads, on their own budget. The drafting page polls
+            // these while a prompt is in flight, and `throttle:ai` exists because
+            // every assistant turn spends the user's own money - these two spend
+            // nothing. Sharing that budget meant a poll in flight made sending an
+            // actual message 429, which is the opposite of what the limiter is for.
+            Route::get('draft-requests', [AiDraftRequestController::class, 'index'])
+                ->middleware('throttle:ai-status');
+            Route::get('drafts', [AiAssistantController::class, 'drafts'])
+                ->middleware('throttle:ai-status');
 
-            // Queued, fire-and-forget drafting. Distinct from the chat above.
-            Route::get('draft-requests', [AiDraftRequestController::class, 'index']);
-            Route::post('draft-requests', [AiDraftRequestController::class, 'store']);
-            Route::get('drafts', [AiAssistantController::class, 'drafts']);
-            Route::patch('drafts/{draft}', [AiAssistantController::class, 'updateDraft']);
-            Route::post('drafts/{draft}/execute', [AiAssistantController::class, 'executeDraft']);
-            Route::post('drafts/{draft}/reject', [AiAssistantController::class, 'rejectDraft']);
+            Route::middleware('throttle:ai')->group(function () {
+                Route::get('conversations', [AiAssistantController::class, 'conversations']);
+                Route::post('conversations', [AiAssistantController::class, 'createConversation']);
+                Route::get('conversations/{conversation}', [AiAssistantController::class, 'show']);
+                Route::post('conversations/{conversation}/messages', [AiAssistantController::class, 'sendMessage']);
+
+                // Queued, fire-and-forget drafting. Distinct from the chat above.
+                Route::post('draft-requests', [AiDraftRequestController::class, 'store']);
+                Route::patch('drafts/{draft}', [AiAssistantController::class, 'updateDraft']);
+                Route::post('drafts/{draft}/execute', [AiAssistantController::class, 'executeDraft']);
+                Route::post('drafts/{draft}/reject', [AiAssistantController::class, 'rejectDraft']);
+            });
         });
 
         Route::post('transactions', [TransactionController::class, 'store']);

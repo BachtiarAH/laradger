@@ -110,6 +110,33 @@ which is exactly what makes that cache safe.
 who may belong to several tenants. It is throttled by the `ai` limiter
 (30/min per user), because every AI call spends that user's own money.
 
+## The `ai` limit is for spending, not for reading
+
+`throttle:ai` is 30/min per user and it exists for exactly one reason: every
+assistant turn costs that user money. `GET /ai/draft-requests` and
+`GET /ai/drafts` call no model and cost nothing, so they sit on a separate
+`ai-status` limiter (120/min) instead. Do not move them back.
+
+They were on the spending limit, and the drafting page polls them while a prompt
+is in flight. It was spending **three** requests every 2.5 seconds — the status
+list, plus the draft list twice over, because the pending count was fetched as a
+separate call — which is 72/min against a 30/min ceiling. A queued prompt
+therefore throttled the screen watching it, and then the user's next real message
+was rejected. The symptom looked like the assistant failing, not like a rate
+limit.
+
+Two things follow, and the second is the one that actually mattered:
+
+- The client polls the **status list only**. A turn cannot produce drafts until it
+  finishes, so re-reading the draft list on every tick was two thirds of the
+  traffic spent on a list that could not have changed; it reloads when a request
+  actually settles. The interval also backs off (2.5s → 30s) and stops entirely
+  on a hidden tab, because a prompt with no worker behind it waits forever.
+- The split matters more than the tuning. A limiter is a statement about what is
+  expensive. Polling a free read against the budget reserved for paid calls makes
+  the two compete, and the user-visible result is that asking a question fails
+  while a progress bar runs.
+
 ## The assistant: propose, never execute
 
 `app/Services/Ai/Omni/` adds an agent loop **above** the gateway. The single
