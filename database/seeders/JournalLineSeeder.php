@@ -17,6 +17,9 @@ class JournalLineSeeder extends Seeder
      */
     public function run(): void
     {
+        /** @var array<string, bool> $codesUsed */
+        $codesUsed = [];
+
         $amountFor = fn (string $key, int $index): int => match ($key) {
             'GAJI' => [8_000_000, 8_500_000, 8_500_000][$index],
             'MAKAN' => [1_200_000, 1_400_000, 150_000][$index],
@@ -26,8 +29,8 @@ class JournalLineSeeder extends Seeder
             default => 0,
         };
 
-        $linesFor = function (string $key, int $amount): array {
-            return match ($key) {
+        $linesFor = function (string $key, int $amount) use (&$codesUsed): array {
+            $plan = match ($key) {
                 'OPEN' => [
                     ['JAGO', 2_000_000, 0, 'Setoran awal'],
                     ['CASH', 500_000, 0, 'Uang tunai di dompet'],
@@ -79,7 +82,39 @@ class JournalLineSeeder extends Seeder
                 ],
                 default => [],
             };
+
+            foreach ($plan as [$code]) {
+                $codesUsed[$code] = true;
+            }
+
+            return $plan;
         };
+
+        /**
+         * Resolve every account code before writing any line.
+         *
+         * This used to `continue` past a code it could not find, which is how a
+         * ledger ended up with 24 journals that were posted and had no lines at
+         * all: every balance read zero, every ratio came out negative, and
+         * nothing anywhere said the seed data had failed to attach. A partial
+         * set of lines is worse than none, because it does not balance and looks
+         * deliberate.
+         */
+        $accountIds = Account::query()->pluck('id', 'code');
+        $missing = array_values(array_filter(
+            array_keys($codesUsed),
+            static fn (string $code): bool => ! $accountIds->has($code),
+        ));
+
+        if ($missing !== []) {
+            $this->command?->error(sprintf(
+                'JournalLineSeeder: no lines were created. These account codes are not in this ledger: %s.',
+                implode(', ', $missing),
+            ));
+            $this->command?->line('  The seeded chart of accounts uses codes like 1, 1-1, 1-1-1-2.');
+
+            return;
+        }
 
         foreach ([0, 1, 2] as $index) {
             $month = now()->startOfMonth()->subMonths(2)->addMonths($index);
@@ -101,14 +136,8 @@ class JournalLineSeeder extends Seeder
                 }
 
                 foreach ($linesFor($key, $amountFor($key, $index)) as [$code, $debit, $credit, $description]) {
-                    $accountId = Account::where('code', $code)->value('id');
-
-                    if (! $accountId) {
-                        continue;
-                    }
-
                     $journal->lines()->firstOrCreate([
-                        'account_id' => $accountId,
+                        'account_id' => $accountIds->get($code),
                         'debit' => $debit,
                         'credit' => $credit,
                         'description' => $description,
