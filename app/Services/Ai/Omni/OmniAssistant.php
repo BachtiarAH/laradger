@@ -69,13 +69,16 @@ class OmniAssistant
      *
      * @return array{reply: string, drafts: Collection<int, AiActionDraft>, reads: array<int, array<string, mixed>>}
      */
-    public function respond(AiConversation $conversation, ?string $prompt = null): array
-    {
+    public function respond(
+        AiConversation $conversation,
+        ?string $prompt = null,
+        string $mode = SystemPromptBuilder::MODE_CHAT,
+    ): array {
         if (filled($prompt)) {
             $this->recordUserMessage($conversation, $prompt);
         }
 
-        $messages = $this->history($conversation);
+        $messages = $this->history($conversation, $mode);
         $options = ['tools' => $this->tools->definitions()];
 
         $reads = [];
@@ -221,9 +224,9 @@ class OmniAssistant
      *
      * @return array<int, array<string, mixed>>
      */
-    private function history(AiConversation $conversation): array
+    private function history(AiConversation $conversation, string $mode): array
     {
-        $messages = [$this->prompts->system()];
+        $messages = [$this->prompts->system($mode)];
 
         $stored = $conversation->messages()
             ->orderByDesc('id')

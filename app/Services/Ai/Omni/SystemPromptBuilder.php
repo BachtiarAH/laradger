@@ -16,6 +16,17 @@ use App\Services\Ai\Tools\AiToolRegistry;
  */
 class SystemPromptBuilder
 {
+    /**
+     * Chat: the user is present and can answer.
+     */
+    public const MODE_CHAT = 'chat';
+
+    /**
+     * Drafting: fire-and-forget. The user has walked away, so a question is a
+     * dead end and the turn would look like a silent failure.
+     */
+    public const MODE_DRAFTING = 'drafting';
+
     public function __construct(
         private readonly AiToolRegistry $tools,
     ) {}
@@ -23,7 +34,7 @@ class SystemPromptBuilder
     /**
      * @return array{role: string, content: string}
      */
-    public function system(): array
+    public function system(string $mode = self::MODE_CHAT): array
     {
         return [
             'role' => 'system',
@@ -31,9 +42,30 @@ class SystemPromptBuilder
                 $this->role(),
                 $this->chartOfAccounts(),
                 $this->hardRules(),
+                $mode === self::MODE_DRAFTING ? $this->unattended() : null,
                 $this->capabilities(),
             ])),
         ];
+    }
+
+    /**
+     * Only added for the queued drafting path.
+     */
+    private function unattended(): string
+    {
+        return <<<'PROMPT'
+        You are running unattended: nobody is watching this turn and there is no
+        way to reply to you. So:
+
+        - Never end your turn on a question. There is nobody to answer it.
+        - If the instruction is ambiguous, pick the most ordinary bookkeeping
+          reading, propose the draft anyway, and say in one line which
+          interpretation you chose.
+        - If no existing account fits, propose `account_create` first, then use
+          the account you just proposed. Never guess an account id.
+        - Every draft is reviewed by a human before anything is applied, so a
+          stated assumption costs nothing while a question costs the whole turn.
+        PROMPT;
     }
 
     private function role(): string

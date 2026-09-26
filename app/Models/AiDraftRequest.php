@@ -36,6 +36,7 @@ class AiDraftRequest extends Model
         'user_id',
         'ai_conversation_id',
         'prompt',
+        'reply',
         'status',
         'error',
         'drafts_count',

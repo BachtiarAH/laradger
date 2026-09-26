@@ -19,6 +19,7 @@ class AiDraftRequestResource extends JsonResource
         return [
             'id' => $this->id,
             'prompt' => $this->prompt,
+            'reply' => $this->reply,
             'status' => $this->status,
             'error' => $this->error,
             'drafts_count' => $this->drafts_count,

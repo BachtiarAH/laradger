@@ -8,6 +8,7 @@ use App\Models\AiDraftRequest;
 use App\Models\Tenant;
 use App\Services\Ai\Exceptions\AiProviderException;
 use App\Services\Ai\Omni\OmniAssistant;
+use App\Services\Ai\Omni\SystemPromptBuilder;
 use App\Tenancy\TenantContext;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -86,7 +87,11 @@ class RunAiDraftRequest implements ShouldQueue
                 'started_at' => now(),
             ])->save();
 
-            $outcome = $assistant->respond($conversation, $request->prompt);
+            $outcome = $assistant->respond(
+                $conversation,
+                $request->prompt,
+                SystemPromptBuilder::MODE_DRAFTING,
+            );
 
             // Stamp the drafts with the prompt that produced them, so the drafts
             // list can say which submission each came from. Done here rather
@@ -106,6 +111,9 @@ class RunAiDraftRequest implements ShouldQueue
             $request->forceFill([
                 'status' => AiDraftRequest::STATUS_COMPLETED,
                 'drafts_count' => $outcome['drafts']->count(),
+                // Kept so an answer the model had to give is not buried in a
+                // transcript the user never opens.
+                'reply' => $outcome['reply'],
                 'completed_at' => now(),
             ])->save();
         } catch (Throwable $e) {
