@@ -40,8 +40,10 @@ class SystemPromptBuilder
             'role' => 'system',
             'content' => implode("\n\n", array_filter([
                 $this->role(),
+                $this->today(),
                 $this->chartOfAccounts(),
                 $this->hardRules(),
+                $this->batching(),
                 $mode === self::MODE_DRAFTING ? $this->unattended() : null,
                 $this->capabilities(),
             ])),
@@ -119,6 +121,37 @@ class SystemPromptBuilder
         - Never invent an account id, a tag id, or a date you were not given.
         - Default to today's real date when the user does not say when something happened.
         - Keep descriptions short and factual, in the language the user wrote in.
+        PROMPT;
+    }
+
+    /**
+     * The model has no clock. Without this it guesses, and a journal posted to
+     * the wrong month quietly corrupts every report built on it.
+     */
+    private function today(): string
+    {
+        $now = now();
+
+        return "Today is {$now->toDateString()} ({$now->isoFormat('dddd')}). "
+            .'Use this as `transaction_date` whenever the user does not say when '
+            .'something happened, and never pick a year or month of your own.';
+    }
+
+    /**
+     * A turn may propose many actions at once. The loop already handles any
+     * number of tool calls, but without being told, a model tends to stop at
+     * the first one and leave the rest of a list unrecorded.
+     */
+    private function batching(): string
+    {
+        return <<<'PROMPT'
+        Handling several items at once:
+        - When the user lists more than one transaction, propose a separate draft
+          for each one in the same reply. Do not stop after the first.
+        - Call the tools as many times as the list needs, then summarise the whole
+          set once at the end.
+        - If a single item is unusable, skip that one and say why, rather than
+          abandoning the rest.
         PROMPT;
     }
 
