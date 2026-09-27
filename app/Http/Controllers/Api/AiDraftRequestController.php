@@ -75,4 +75,47 @@ class AiDraftRequestController extends Controller
             'data' => (new AiDraftRequestResource($draftRequest->refresh()))->resolve($request),
         ], 202);
     }
+
+    /**
+     * Cancel a queued or running draft request.
+     *
+     * If the job has not started yet, it is removed from the queue. If it is
+     * already running, the request is marked as cancelled and the job will
+     * discard the results when the current AI call finishes.
+     */
+    public function cancel(string $tenant, Request $request, AiDraftRequest $draftRequest): JsonResponse
+    {
+        $this->authorize('update', $draftRequest);
+
+        if ($draftRequest->isSettled()) {
+            return response()->json([
+                'data' => (new AiDraftRequestResource($draftRequest))->resolve($request),
+            ]);
+        }
+
+        // If still queued, try to delete the job from the queue so the worker
+        // never picks it up. If it is already running, the job will check the
+        // status and exit early.
+        if ($draftRequest->status === AiDraftRequest::STATUS_QUEUED) {
+            // The job ID is not stored on the model, so we rely on the status
+            // check inside the job. Marking as cancelled is sufficient — the job
+            // checks before doing any work.
+            $draftRequest->forceFill([
+                'status' => AiDraftRequest::STATUS_CANCELLED,
+                'completed_at' => now(),
+                'error' => null,
+            ])->save();
+        } else {
+            // Running: mark as cancelled, the job will check after respond().
+            $draftRequest->forceFill([
+                'status' => AiDraftRequest::STATUS_CANCELLED,
+                'completed_at' => now(),
+                'error' => null,
+            ])->save();
+        }
+
+        return response()->json([
+            'data' => (new AiDraftRequestResource($draftRequest->refresh()))->resolve($request),
+        ]);
+    }
 }

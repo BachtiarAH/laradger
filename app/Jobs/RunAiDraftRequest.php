@@ -54,6 +54,11 @@ class RunAiDraftRequest implements ShouldQueue
             return;
         }
 
+        // The user may have cancelled while the job was still in the queue.
+        if ($request->isCancelled()) {
+            return;
+        }
+
         $tenant = Tenant::find($request->tenant_id);
         $user = $request->user;
 
@@ -92,6 +97,17 @@ class RunAiDraftRequest implements ShouldQueue
                 $request->prompt,
                 SystemPromptBuilder::MODE_DRAFTING,
             );
+
+            // Re-fetch to check if the user cancelled while the AI was working.
+            $request->refresh();
+            if ($request->isCancelled()) {
+                $conversation->forceFill([
+                    'status' => AiConversation::STATUS_CANCELLED,
+                    'completed_at' => now(),
+                ])->save();
+
+                return;
+            }
 
             // Stamp the drafts with the prompt that produced them, so the drafts
             // list can say which submission each came from. Done here rather
@@ -134,7 +150,8 @@ class RunAiDraftRequest implements ShouldQueue
     {
         $request = AiDraftRequest::withoutGlobalScopes()->find($this->draftRequestId);
 
-        if ($request !== null && ! $request->isSettled()) {
+        // Don't override a user-initiated cancellation with a failure.
+        if ($request !== null && ! $request->isSettled() && ! $request->isCancelled()) {
             $this->markFailed($request, 'The drafting request could not be completed.', $e);
         }
     }

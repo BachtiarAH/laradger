@@ -119,6 +119,7 @@ Route::prefix('v1')->group(function () {
 
                 // Queued, fire-and-forget drafting. Distinct from the chat above.
                 Route::post('draft-requests', [AiDraftRequestController::class, 'store']);
+                Route::post('draft-requests/{draft_request}/cancel', [AiDraftRequestController::class, 'cancel']);
                 Route::patch('drafts/{draft}', [AiAssistantController::class, 'updateDraft']);
                 Route::post('drafts/{draft}/execute', [AiAssistantController::class, 'executeDraft']);
                 Route::post('drafts/{draft}/reject', [AiAssistantController::class, 'rejectDraft']);

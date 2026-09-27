@@ -32,6 +32,8 @@ class AiDraftRequest extends Model
 
     public const STATUS_FAILED = 'failed';
 
+    public const STATUS_CANCELLED = 'cancelled';
+
     protected $fillable = [
         'tenant_id',
         'user_id',
@@ -77,6 +79,11 @@ class AiDraftRequest extends Model
     public function isSettled(): bool
     {
         return ! in_array($this->status, [self::STATUS_QUEUED, self::STATUS_RUNNING], true);
+    }
+
+    public function isCancelled(): bool
+    {
+        return $this->status === self::STATUS_CANCELLED;
     }
 
     public function turnOutcome(): ?TurnOutcome
