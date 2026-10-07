@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureApiAbility;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\ResolveTenant;
 use App\Http\Middleware\SetTenantContext;
@@ -29,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'tenant' => ResolveTenant::class,
             'admin' => EnsureUserIsAdmin::class,
+            'ability' => EnsureApiAbility::class,
         ]);
 
         $middleware->redirectGuestsTo(

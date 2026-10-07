@@ -54,5 +54,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('ai-status', function (Request $request) {
             return Limit::perMinute(120)->by((string) ($request->user()?->getKey() ?? $request->ip()));
         });
+
+        // Minting API keys. Low, because a legitimate session issues a handful
+        // over its lifetime and each one mints a durable credential — this is not
+        // a spending limit, it is a guard against a hijacked session spraying
+        // usable keys. Listing and revoking are not throttled: they neither
+        // create anything nor cost anything.
+        RateLimiter::for('api-keys', function (Request $request) {
+            return Limit::perHour(10)->by((string) ($request->user()?->getKey() ?? $request->ip()));
+        });
     }
 }

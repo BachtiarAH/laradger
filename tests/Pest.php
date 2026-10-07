@@ -63,3 +63,51 @@ function createTenantForUser(User $user): Tenant
 
     return $tenant;
 }
+
+/**
+ * Mint a real bearer token for a user.
+ *
+ * These tests deliberately do not use `Sanctum::actingAs()`. That helper stands
+ * in a token whose abilities are stubbed expectations rather than stored data,
+ * so it cannot represent a restricted key at all. A key is the thing under test
+ * here, so it goes through the real token lookup.
+ */
+function apiKeyFor(User $user, array $abilities, ?int $days = 30): string
+{
+    return $user->createToken('apikey:test', $abilities, now()->addDays($days))->plainTextToken;
+}
+
+/**
+ * Present an API key, discarding any credential resolved earlier in the test.
+ *
+ * `withToken()` only rewrites a default header. The auth manager caches the user
+ * it resolved on the first guarded request, and Sanctum asks that cache rather
+ * than re-reading the header, so a second `withToken()` in the same test keeps
+ * authenticating as the *first* key. Forgetting the guards is what makes a
+ * credential switch observable.
+ *
+ * This is a test-harness artefact, not product behaviour: in production each
+ * request gets a fresh container, so a new header is a new identity. Several
+ * tests assert a denial and then a success with a wider key on the same
+ * endpoint, which is exactly the pairing that would silently pass against the
+ * wrong key.
+ */
+function asApiKey(string $token): Illuminate\Foundation\Testing\TestCase
+{
+    app('auth')->forgetGuards();
+
+    return test()->withToken($token);
+}
+
+/**
+ * A minimally valid account payload, for tests that only need a creatable record.
+ */
+function validAccountPayload(array $overrides = []): array
+{
+    return array_merge([
+        'name' => 'Petty Cash',
+        'type' => 'asset',
+        'currency' => 'IDR',
+        'status' => 'active',
+    ], $overrides);
+}

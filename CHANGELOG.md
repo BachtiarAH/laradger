@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Scoped, expiring API keys for unattended clients. `php artisan api:issue-key` mints a Sanctum token carrying a fixed set of abilities and always an expiry (`API_KEY_DEFAULT_DAYS`, capped by `API_KEY_MAX_DAYS`). A key can never be granted more abilities after issue, and requesting an unrecognised ability fails loudly rather than being silently dropped.
+- `ApiAbility` / `ApiArea` enums. An ability is `area:tier`; tiers climb within an area and nothing is implied across areas. The areas are `ledger` (journals, accounts, lines, expenses, AI drafting), `planning` (allocations, goals, budgets), `library` (tags, journal templates), `audit` (the change log), and `platform` (staff accounts).
+- `ApiKeyIssuer` service holding the issuance rules — at least one ability, an expiry, and collapsing redundant abilities per area — so the guarantees hold for any future caller and not just the console command.
+- `php artisan api:revoke-key` lists an account's keys and revokes them by token id or `--all`. Keys are identified by their `apikey:` name prefix rather than by abilities, so "revoke everything" cannot reach the login token someone is using to drive the web app.
+- `EnsureApiAbility` middleware, registered as the `ability` alias and applied after `auth:sanctum` on every authenticated route group. It resolves one required ability per route — area from the path, tier from the method — and returns `403` naming both the missing ability and the ones that would satisfy it.
+- A per-user API key management page and API. `GET/POST /me/api-keys` and `DELETE /me/api-keys/{token}` issue, list, and revoke the caller's own keys, so the page and `api:issue-key` produce identical keys through the same issuer.
+- `ApiKeyManager` service holding the per-user scoping rules, including the prefix filter that keeps the login token out of reach of "revoke everything".
+- Frontend route `/settings/api-keys`, with abilities grouped by area and checkboxes that mark the tiers a wider choice already subsumes. It is scoped to the signed-in user's own keys; there is no endpoint for managing anyone else's.
+- `docs/openapi.yaml` documents the areas, the ability matrix, how each endpoint's requirement is resolved, and the issuance/revocation commands and endpoints.
+
+### Changed
+
+- **Breaking for keys issued before this change.** A key holding `ledger:destructive` previously reached allocations, goals, budgets, tags, and templates implicitly, because those were simply more ledger endpoints. It now reaches only the ledger area and must be reissued with the abilities it still needs. `ledger:*` keys otherwise behave exactly as before, and completing an allocation is a `planning:write` rather than a `ledger:write`.
+- `config/api-keys.php` replaces `admin_paths` with an `areas` map, checked in order, first match wins, falling back to `ledger` for unlisted paths.
+
+### Security
+
+- **A key cannot issue a key.** `POST /me/api-keys` returns `403` to any request authenticated with an issued key, whatever that key holds. Without this, a leaked `ledger:read` key could mint itself a `platform:admin` key and take the account over — every ability tier would be a speed bump. The check is on the `apikey:` name prefix rather than the credential's type, because this app's SPA authenticates with a `createToken('api-token')` bearer rather than a Sanctum cookie session; the two are the same token class. Listing and revoking stay reachable with a key, so a leak can be cut without a human present.
+- The audit log moved off `ledger:read` onto its own `audit:read`. An audit row carries `user_id` plus full `before` and `after` images, so a read-only integration would otherwise have seen every change every colleague made — including allocation targets and goals that were never published. Reading a number is not reading the change history behind it.
+- Areas are separated so a `ledger:destructive` key cannot read budgets, and a `planning:read` key cannot read journals. Previously all six feature areas shared one ladder, leaving a blanket read as the only safe thing to hand a narrow integration.
+- `/me/api-keys` sits outside the `ability` middleware group: these routes manage credentials rather than ledger data, so the ledger tiers do not describe them, and `platform:admin` is not a ledger ability at all.
+- Revoking another account's key id returns `404`, not `403` — a 403 would confirm the id exists there.
+- Minting is throttled to 10/hour per user; a hijacked session cannot spray usable keys.
+
+### Notes
+
+- **Not a breaking change for API clients.** Tokens issued by `POST /login` carry no ability list and keep full access; adding the middleware costs existing clients nothing. Browser sessions are likewise not ability-gated. Only keys issued through `api:issue-key` are constrained.
+- `platform:admin` is absent from the self-service picker. It is for staff accounts, and offering it would let an ordinary user mint a key worth nothing until they are promoted. The ability itself is unchanged and `api:issue-key` can still issue one.
+
 ## [0.1.2] - 2026-09-05
 
 ### Added

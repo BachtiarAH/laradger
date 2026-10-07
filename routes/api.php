@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AiDraftRequestController;
 use App\Http\Controllers\Api\AiJournalDraftController;
 use App\Http\Controllers\Api\AiSettingsController;
 use App\Http\Controllers\Api\AllocationController;
+use App\Http\Controllers\Api\ApiKeyController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BudgetController;
@@ -50,7 +51,10 @@ Route::prefix('v1')->group(function () {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:register');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
 
-    Route::middleware('auth:sanctum')->group(function () {
+    // `ability` gates what the presented key may do, on top of who it is. It
+    // must come after `auth:sanctum`: it reads the authenticated user, and a
+    // bearer-less request has none.
+    Route::middleware(['auth:sanctum', 'ability'])->group(function () {
         Route::get('/tenants', [TenantController::class, 'index']);
         Route::post('/tenants', [TenantController::class, 'store']);
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -65,14 +69,25 @@ Route::prefix('v1')->group(function () {
         });
     });
 
+    // Personal API keys. Deliberately NOT in the `ability` group: these manage
+    // credentials, not ledger data, so the ledger tiers do not describe them and
+    // `platform:admin` is not a ledger ability at all. Minting is restricted to a
+    // signed-in session inside the controller, which is the only way to stop a
+    // key from issuing one wider than itself.
+    Route::middleware(['auth:sanctum'])->prefix('me/api-keys')->group(function () {
+        Route::get('/', [ApiKeyController::class, 'index']);
+        Route::post('/', [ApiKeyController::class, 'store'])->middleware('throttle:api-keys');
+        Route::delete('/{token}', [ApiKeyController::class, 'destroy']);
+    });
+
     // Platform admin area (no tenant in the URL; requires the 'admin' middleware).
-    Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function () {
+    Route::middleware(['auth:sanctum', 'admin', 'ability'])->prefix('admin')->group(function () {
         Route::get('users', [UserAdminController::class, 'index']);
         Route::post('users', [UserAdminController::class, 'store']);
         Route::put('users/{user}', [UserAdminController::class, 'update']);
     });
 
-    Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant'])->group(function () {
+    Route::prefix('{tenant}')->middleware(['auth:sanctum', 'tenant', 'ability'])->group(function () {
         Route::get('journals/next-reference', [NextReferenceController::class, 'journalReference']);
         Route::get('accounts/next-code', [NextReferenceController::class, 'accountCode']);
         Route::get('accounts/{account}/journal-lines', [AccountController::class, 'journalLines']);
