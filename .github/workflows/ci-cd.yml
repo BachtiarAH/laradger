@@ -113,7 +113,7 @@ jobs:
           IMAGE_REPOSITORY: ${{ needs.build.outputs.image }}
           IMAGE_TAG: ${{ github.sha }}
           GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -122,6 +122,7 @@ jobs:
           envs: DEPLOY_PATH,IMAGE_REPOSITORY,IMAGE_TAG,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
+            export PATH="$PATH:/usr/local/bin:/usr/bin:/snap/bin"
             cd "$DEPLOY_PATH"
 
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
