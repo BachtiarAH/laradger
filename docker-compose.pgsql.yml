@@ -1,0 +1,54 @@
+# Overlay: use PostgreSQL 17 instead of the default SQLite database.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pgsql.yml up -d
+#
+# The DB_* values below win over the host .env, so the app, queue worker and
+# scheduler can never point at different databases.
+x-db-env: &db-env
+  DB_CONNECTION: pgsql
+  DB_HOST: pgsql
+  DB_PORT: "5432"
+  DB_DATABASE: ${DB_DATABASE:-laradger}
+  DB_USERNAME: ${DB_USERNAME:-laradger}
+  DB_PASSWORD: ${DB_PASSWORD:-secret}
+
+services:
+  pgsql:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-laradger}
+      POSTGRES_USER: ${DB_USERNAME:-laradger}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${FORWARD_DB_PORT:-5433}:5432"
+    volumes:
+      - pgsql-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  app:
+    environment: *db-env
+    depends_on:
+      pgsql:
+        condition: service_healthy
+
+  queue:
+    environment: *db-env
+    depends_on:
+      pgsql:
+        condition: service_healthy
+
+  scheduler:
+    environment: *db-env
+    depends_on:
+      pgsql:
+        condition: service_healthy
+
+volumes:
+  pgsql-data:

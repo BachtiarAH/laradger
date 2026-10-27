@@ -1,0 +1,77 @@
+name: laradger-prod
+
+x-app: &app
+  image: ${IMAGE_REPOSITORY:-ghcr.io/example/laradger}:${IMAGE_TAG:-latest}
+  init: true
+  restart: unless-stopped
+  environment:
+    APP_ENV: production
+    APP_DEBUG: "false"
+    RUN_MIGRATIONS: "false"
+    # Hardcoded so container env wins over LOG_CHANNEL in the mounted .env:
+    # production logs go to docker logs, not to storage/logs.
+    LOG_CHANNEL: stderr
+    DB_CONNECTION: ${DB_CONNECTION:-sqlite}
+    DB_DATABASE: ${DB_DATABASE:-/var/lib/laradger/database.sqlite}
+  volumes:
+    - ./.env:/var/www/html/.env:ro
+    - storage:/var/www/html/storage
+    - sqlite:/var/lib/laradger
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  app:
+    <<: *app
+    command: ["php-fpm", "-F"]
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(@fsockopen(\"127.0.0.1\", 9000) ? 0 : 1);'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  web:
+    image: ${IMAGE_REPOSITORY:-ghcr.io/example/laradger}-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # Bound to loopback on purpose: TLS and the public domain are handled by the
+    # reverse proxy already running on the host.
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:80"
+    volumes:
+      - storage:/var/www/html/storage:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/up >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  queue:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--tries=1", "--timeout=0", "--sleep=3", "--max-time=3600"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  storage:
+  sqlite:
