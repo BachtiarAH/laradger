@@ -1,0 +1,19 @@
+# Overlay: build the production images on the server itself, without GHCR/CI.
+#
+#   export COMPOSE_FILE=docker-compose.prod.yml:docker-compose.prod.build.yml
+#   docker compose build --pull
+#   docker compose run --rm app php artisan migrate --force --step
+#   docker compose up -d --remove-orphans
+#
+# Requires the repository (the build context) on the server. Keep
+# IMAGE_REPOSITORY/IMAGE_TAG in .env so the built images get a stable name.
+services:
+  app:
+    build:
+      context: .
+      target: production
+
+  web:
+    build:
+      context: .
+      target: webserver

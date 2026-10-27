@@ -1,0 +1,51 @@
+# version control / tooling
+.git
+.github
+.gitignore
+.gitattributes
+.editorconfig
+.dockerignore
+agents
+.agents
+.ai
+.opencode
+opencode.json
+boost.json
+
+# local environment & secrets
+.env
+.env.*
+!.env.example
+
+# dependencies & build output
+vendor
+node_modules
+public/hot
+public/storage
+public/fonts-manifest.dev.json
+
+# runtime state (kept out of the image; mounted as volumes)
+storage/app/*
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/pail
+storage/*.key
+bootstrap/cache/*.php
+
+# databases
+database/*.sqlite
+database/*.sqlite-*
+
+# tests & local docs
+tests
+phpunit.xml
+docs/FE_MIGRATION.md
+*.md
+!README.md
+
+# container definitions themselves
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
